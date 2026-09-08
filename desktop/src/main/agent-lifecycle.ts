@@ -95,6 +95,8 @@ export class AgentLifecycle {
     }
     if (this.#platform === "linux") {
       await this.#installLinuxUnit();
+      // An explicit retry should also recover a service stopped by its start limit.
+      await this.#systemctl(["reset-failed", linuxServiceName]);
       await this.#systemctl(["restart", linuxServiceName]);
       await this.#waitForLinuxActive();
       return;
@@ -188,10 +190,15 @@ export class AgentLifecycle {
       "[Unit]",
       "Description=fd0 local vault service",
       "Documentation=https://fd0.sh/docs",
+      "StartLimitIntervalSec=60s",
+      "StartLimitBurst=5",
       "",
       "[Service]",
       "Type=simple",
       `ExecStart=${systemdQuote(this.#appPath)} --fd0-agent-relay`,
+      // AppImage's FUSE helper cannot elevate under NoNewPrivileges. Native
+      // packages ignore this variable; AppImages extract before running the relay.
+      "Environment=APPIMAGE_EXTRACT_AND_RUN=1",
       "Restart=on-failure",
       "RestartSec=2s",
       "TimeoutStopSec=10s",
@@ -218,6 +225,9 @@ export class AgentLifecycle {
       await writeFile(staged, unit, { mode: 0o600 });
       await rename(staged, path);
       await this.#systemctl(["daemon-reload"]);
+      // Repair an old managed unit even if its previous launch hit the limit.
+      // Unchanged units retain the limit across ordinary ensureRunning calls.
+      if (current) await this.#systemctl(["reset-failed", linuxServiceName]);
     }
   }
 

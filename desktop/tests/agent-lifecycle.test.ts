@@ -111,9 +111,53 @@ test("AgentLifecycle installs and starts an isolated systemd user service", asyn
   );
   expect(unit).toContain('ExecStart="/opt/fd0 app/fd0-desktop" --fd0-agent-relay');
   expect(unit).toContain("Restart=on-failure");
+  expect(unit).toContain("StartLimitIntervalSec=60s");
+  expect(unit).toContain("StartLimitBurst=5");
+  expect(unit).toContain("NoNewPrivileges=true");
   expect(calls).toEqual([
     ["--user", "daemon-reload"],
     ["--user", "enable", "--now", "fd0-agent.service"],
+    ["--user", "is-active", "fd0-agent.service"],
+  ]);
+});
+
+test("AgentLifecycle upgrades a failed AppImage service without FUSE and preserves subsequent start limits", async () => {
+  const home = await mkdtemp(join(tmpdir(), "fd0-agent-appimage-"));
+  const directory = join(home, ".config", "systemd", "user");
+  const unitPath = join(directory, "fd0-agent.service");
+  await mkdir(directory, { recursive: true });
+  await writeFile(unitPath, '# fd0-desktop-managed-v1\n[Service]\nExecStart="/home/test/fd0-desktop" --fd0-agent-relay\nNoNewPrivileges=true\n');
+  const calls: string[][] = [];
+  let rateLimited = true;
+  const lifecycle = new AgentLifecycle({
+    platform: "linux", packaged: true, appPath: "/home/test/fd0-desktop", home,
+    run: async (_file, args) => {
+      const values = args as string[];
+      calls.push(values);
+      if (values.includes("reset-failed")) rateLimited = false;
+      if (values.includes("enable") || values.includes("restart")) {
+        const unit = await readFile(unitPath, "utf8");
+        if (!unit.includes("Environment=APPIMAGE_EXTRACT_AND_RUN=1")) throw new Error("AppImage cannot mount under NoNewPrivileges");
+        if (rateLimited) throw new Error("start-limit-hit");
+      }
+      return { stdout: values.includes("is-active") ? "active\n" : "", stderr: "" };
+    },
+  });
+  expect(await lifecycle.ensureRunning()).toBe("enabled");
+  expect(calls.slice(0, 3)).toEqual([
+    ["--user", "daemon-reload"],
+    ["--user", "reset-failed", "fd0-agent.service"],
+    ["--user", "enable", "--now", "fd0-agent.service"],
+  ]);
+  calls.length = 0;
+  rateLimited = true;
+  await expect(lifecycle.ensureRunning()).rejects.toThrow("start-limit-hit");
+  expect(calls).toEqual([["--user", "enable", "--now", "fd0-agent.service"]]);
+  calls.length = 0;
+  await lifecycle.restart();
+  expect(calls).toEqual([
+    ["--user", "reset-failed", "fd0-agent.service"],
+    ["--user", "restart", "fd0-agent.service"],
     ["--user", "is-active", "fd0-agent.service"],
   ]);
 });
