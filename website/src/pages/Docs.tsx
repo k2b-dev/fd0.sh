@@ -135,6 +135,7 @@ const OverviewBody = () => (
 
     <TileGrid>
       <Tile href="/docs/install" title="Start here" body="Install the client, create a vault, store the first secret, and sync." />
+      <Tile href="/docs/install#agent-skill" title="Agent skill" body="Teach your coding agent to use fd0 for passwords, SSH keys, and other credentials." />
       <Tile href="/docs/desktop" title="Desktop app" body="Download fd0 Desktop for macOS or Linux and see what the app holds." />
       <Tile href="/docs/concepts" title="Concepts" body="The small vocabulary used by every fd0 command." />
       <Tile href="/docs/cli" title="Daily use" body="One grammar for every module, plus scopes, sharing, and health checks." />
@@ -396,26 +397,28 @@ $ fd0 update --flavor=yubikey`}</Box>
       socket path has not been validated on Windows.
     </Note>
 
-    <H2>Teach your coding agent about fd0</H2>
+    <H2 id="agent-skill">Use fd0 with your coding agent</H2>
     <P>
-      fd0 ships an agent skill in the same repository. Installing it lets
-      Claude Code and other skill-aware runtimes recognise "save this deploy
-      key" or "share the prod password with bob" as fd0 work, and reach for
-      the right command instead of guessing at one.
+      Install the fd0 skill to give your coding agent instructions for storing
+      passwords, managing SSH keys, sharing scopes, and working with Kubernetes
+      and Talos credentials. You can then ask it to “store this login in fd0”
+      or “list my SSH hosts.”
     </P>
-    <Box>{`$ bunx skills add k2b-dev/fd0.sh`}</Box>
+    <P>Run either command, depending on whether you use npm or Bun:</P>
+    <Box>{`$ npx skills add k2b-dev/fd0.sh
+# Or with Bun:
+$ bunx skills add k2b-dev/fd0.sh`}</Box>
     <P>
-      The installer copies <Code>skills/fd0/</Code> into your agent's skill
-      directory — usually <Code>~/.claude/skills/fd0/</Code>. The skill loads
-      on the next session. If your runtime uses npm rather than Bun,{" "}
-      <Code>npx skills add k2b-dev/fd0.sh</Code> does the same thing, and
-      copying the directory by hand works just as well.
+      Select the agents you use in the installer. The Skills CLI supports
+      Claude Code, Codex, Cursor, and other coding agents. Installation is
+      project-local by default; add <Code>--global</Code> to make the skill
+      available across projects. Start a new agent session after installation.
     </P>
     <Note>
-      The skill covers the whole surface — vaults and scopes, the password
-      manager, SSH, Kubernetes and Talos, sharing, recovery and the failure
-      modes worth knowing. It carries no secrets and needs no access to your
-      vault; it only teaches the agent which command to run.
+      The skill contains instructions, not credentials. Install fd0 itself
+      using the steps above and initialize your vault below. When your agent
+      uses fd0, the same vault access and unlock requirements apply as when
+      you run the CLI yourself.
     </Note>
 
     <H2>Create a vault</H2>
@@ -787,6 +790,11 @@ $ fd0 unlock`}</Box>
 
 const CliBody = () => (
   <>
+    <P>
+      Using fd0 through a coding agent?{" "}
+      <Link href="/docs/install#agent-skill">Install the fd0 skill</Link>{" "}
+      to give it the commands and workflows for your vault.
+    </P>
     <P>
       The CLI works mostly from local state. <Code>fd0 sync</Code> is the
       explicit network command; the agent can also sync after unlock when{" "}

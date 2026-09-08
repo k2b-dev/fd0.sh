@@ -97,6 +97,22 @@ fd0 secret get DEPLOY_KEY
 The hosted fd0.sh service is already configured. To use your own server, follow
 the [self-hosting guide](https://fd0.sh/docs/server).
 
+## Use fd0 with your coding agent
+
+Install the fd0 skill to give your coding agent instructions for managing
+passwords, SSH keys, scopes, and other credentials. Run either command:
+
+```sh
+npx skills add k2b-dev/fd0.sh
+# Or with Bun:
+bunx skills add k2b-dev/fd0.sh
+```
+
+Select your agents in the installer. Installation is project-local by default;
+add `--global` to use the skill across projects. The skill contains instructions;
+fd0 itself and an initialized vault are still required. Normal vault access and
+unlock requirements apply. See the [agent skill setup](https://fd0.sh/docs/install#agent-skill).
+
 ## Learn fd0
 
 - [Install Desktop, CLI, and agent](https://fd0.sh/docs/install)

@@ -967,6 +967,21 @@ $ fd0 sync`}
         </div>
       </div>
 
+      <div class="mb-12 max-w-2xl">
+        <h3 class="text-lg font-medium mb-3">Use fd0 with your coding agent</h3>
+        <p class="text-sm leading-relaxed mb-4" style={`color:${C.dim};`}>
+          Add the fd0 skill so your coding agent knows how to store passwords,
+          manage SSH keys, and work with your vault. Choose either command:
+        </p>
+        <Shell>{`npx skills add k2b-dev/fd0.sh
+# Or with Bun:
+bunx skills add k2b-dev/fd0.sh`}</Shell>
+        <p class="text-xs mt-3 leading-relaxed" style={`color:${C.dim};`}>
+          Install and set up fd0 separately; the skill supplies instructions for
+          using it. <a href="/docs/install#agent-skill" style={`color:${C.acc};`}>Agent selection and setup →</a>
+        </p>
+      </div>
+
       {/* step 2: pick backend */}
       <div>
         <div

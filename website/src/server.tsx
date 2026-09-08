@@ -183,6 +183,12 @@ const renderLlmsTxt = (): string =>
         `- [${route.title}](${canonicalUrl(route.path)}): ${route.description}`,
     ),
     "",
+    "## Agent skill",
+    "Install with `npx skills add k2b-dev/fd0.sh` or `bunx skills add k2b-dev/fd0.sh`.",
+    "The skill provides fd0 CLI instructions. Install fd0 and initialize a vault separately; normal access and unlock requirements apply.",
+    "- [Agent skill setup](https://fd0.sh/docs/install#agent-skill): choose agents and project or global installation.",
+    "- [Skill source](https://github.com/k2b-dev/fd0.sh/tree/main/skills/fd0): instructions and command references.",
+    "",
     "## Protocol and trust model",
     ...SEO_ROUTES.filter(
       (route) => route.path.startsWith("/spec") || route.path === "/witness",
