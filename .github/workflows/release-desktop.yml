@@ -42,10 +42,15 @@ jobs:
       - name: test Go packages
         run: go test ./...
 
+      - name: install desktop component test runtime
+        working-directory: desktop
+        run: bunx playwright install chromium
+
       - name: test desktop app
         working-directory: desktop
         run: |
           bun run typecheck
+          bun test
           bun run test:e2e
 
       - name: upload desktop E2E diagnostics

@@ -99,6 +99,10 @@ jobs:
         working-directory: desktop
         run: bun install --frozen-lockfile
 
+      - name: install desktop component test runtime
+        working-directory: desktop
+        run: bunx playwright install chromium
+
       - name: test desktop app
         working-directory: desktop
         run: |

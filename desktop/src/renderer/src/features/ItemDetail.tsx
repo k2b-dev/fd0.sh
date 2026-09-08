@@ -46,7 +46,7 @@ export function ItemDetail(props: {
   return (
     <article class="detail-panel" aria-label="Item details">
       <Show
-        when={vault.detail()}
+        when={vault.detail()?.item.id}
         keyed
         fallback={
           <div class="empty-state detail-empty">
@@ -58,9 +58,9 @@ export function ItemDetail(props: {
           </div>
         }
       >
-        {(detail) => (
+        {(_id) => (
           <DetailContent
-            detail={detail}
+            detail={vault.detail()!}
             raw={raw()}
             onEdit={props.onEdit}
             onDuplicate={props.onDuplicate}
@@ -88,6 +88,8 @@ function DetailContent(props: {
   const vault = useVault();
   const [revealed, setRevealed] = createSignal<Record<string, { value: string; expiresAt: number }>>({});
   const [now, setNow] = createSignal(Date.now());
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
 
   const item = () => props.detail.item;
   const allFields = createMemo(() => props.detail.fields.flatMap(flattenFieldViews));
@@ -149,8 +151,10 @@ function DetailContent(props: {
     onCleanup(() => clearTimeout(timer));
   });
 
+  // The parent remounts on item changes, but keeps this state across focus and
+  // TOTP refreshes of the same item. Switching projections still hides values.
   createEffect(() => {
-    item().id;
+    props.raw;
     setRevealed({});
   });
 
@@ -171,7 +175,7 @@ function DetailContent(props: {
     }
     try {
       const result = await window.fd0.reveal({ scopeId: item().scopeId, name: item().recordName, path: field.path });
-      if (!result) return;
+      if (!result || disposed) return;
       setNow(Date.now());
       setRevealed((current) => ({
         ...current,
