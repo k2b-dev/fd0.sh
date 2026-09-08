@@ -109,6 +109,7 @@ export type ItemSummary = {
   /** Safe, non-secret metadata used only for local search. */
   searchText?: string;
   hasTOTP?: boolean;
+  tags?: string[];
 };
 
 export type FileView = {

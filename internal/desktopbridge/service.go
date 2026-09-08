@@ -1337,11 +1337,11 @@ func (s *Service) savePass(ctx context.Context, params SavePassParams) (map[stri
 		if !errors.Is(existingErr, cli.ErrTypedSecretNotFound) {
 			return nil, mapDomainError(existingErr)
 		}
-		if params.Item.Meta == nil {
-			created := passitem.New(params.Item.Title, params.Item.URLs)
-			created.Fields = params.Item.Fields
-			params.Item = created
+		item, err := preparePassSave(params.Item, nil)
+		if err != nil {
+			return nil, fail("validation", err.Error(), "", false)
 		}
+		params.Item = item
 	} else {
 		if existingErr != nil {
 			if errors.Is(existingErr, cli.ErrTypedSecretNotFound) {
@@ -1357,11 +1357,19 @@ func (s *Service) savePass(ctx context.Context, params SavePassParams) (map[stri
 				return nil, err
 			}
 		}
-		if raw, err := existing.PayloadJSON(); err == nil {
-			if old, err := passitem.Decode(raw); err == nil && params.Item.Meta == nil {
-				params.Item.Meta = old.Meta
-			}
+		raw, err := existing.PayloadJSON()
+		if err != nil {
+			return nil, mapDomainError(err)
 		}
+		old, err := passitem.Decode(raw)
+		if err != nil {
+			return nil, mapDomainError(err)
+		}
+		item, err := preparePassSave(params.Item, old)
+		if err != nil {
+			return nil, fail("validation", err.Error(), "", false)
+		}
+		params.Item = item
 		params.Item.Touch()
 	}
 	if err := params.Item.Validate(); err != nil {

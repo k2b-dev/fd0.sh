@@ -10,6 +10,8 @@ import { Field, Input, Select, Textarea } from "../ui/Fields";
 import { Modal } from "../ui/Modal";
 import { MAX_FIELDS, PasswordCards } from "./PasswordCards";
 import { readNotes, withoutNotes, writeNotes } from "../lib/notes";
+import { TagInput } from "./TagInput";
+import { addTag, tagCatalog } from "../lib/tags";
 import { SSHKeyPicker } from "./SSHKeyPicker";
 
 /**
@@ -32,6 +34,7 @@ export type ItemDraft = {
    * the first on the next save.
    */
   urls: string[];
+  tags: string[];
   /** Password items only. Arbitrary, nestable fields. */
   fields: PassField[];
   /** Secret items only. */
@@ -55,6 +58,7 @@ export function emptyDraft(kind: EditorKind, scopeId: string, initialPassword = 
     scopeId,
     title: "",
     urls: [],
+    tags: [],
     fields,
     value: "",
     host: { hostname: "", user: "", port: 22, keyName: "", jumpHost: "", notes: "" },
@@ -98,6 +102,9 @@ export function ItemEditor(props: {
   const [scopeID, setScopeID] = createSignal(props.draft.scopeId);
   const [title, setTitle] = createSignal(props.draft.title);
   const [urls, setURLs] = createSignal<string[]>([...props.draft.urls]);
+  const [tags, setTags] = createSignal([...props.draft.tags]);
+  const [pendingTag, setPendingTag] = createSignal("");
+  const tagOptions = createMemo(() => scopeID() ? tagCatalog(vault.inventory().items, scopeID()) : []);
   // The reserved note is edited on its own and folded back in on save, so the
   // field tree never shows it as one more ordinary row.
   const [fields, setFields] = createSignal<PassField[]>(withoutNotes(structuredClone(props.draft.fields)));
@@ -114,6 +121,7 @@ export function ItemEditor(props: {
   const isPassword = () => props.draft.kind === "password";
 
   const original = JSON.stringify({
+    tags: props.draft.tags,
     title: props.draft.title,
     urls: [...props.draft.urls],
     fields: withoutNotes(props.draft.fields),
@@ -123,12 +131,15 @@ export function ItemEditor(props: {
     comment: props.draft.comment,
   });
   const dirty = (): boolean =>
-    JSON.stringify({ title: title(), urls: urls(), fields: fields(), notes: notes(), value: value(), host: host(), comment: comment() }) !== original;
+    !!pendingTag() || scopeID() !== props.draft.scopeId || JSON.stringify({ tags: tags(), title: title(), urls: urls(), fields: fields(), notes: notes(), value: value(), host: host(), comment: comment() }) !== original;
 
   const titleLabel = () => (props.draft.kind === "password" ? "Title" : "Name");
 
   const canSave = createMemo(() => {
     if (!scopeID()) return false;
+    if (isPassword()) {
+      try { addTag(tags(), pendingTag(), tagOptions()); } catch { return false; }
+    }
     if (imports()) return true;
     if (!title().trim()) return false;
     if (invalid().size > 0) return false;
@@ -152,6 +163,10 @@ export function ItemEditor(props: {
 
     switch (props.draft.kind) {
       case "password": {
+        const nextTags = addTag(tags(), pendingTag(), tagOptions());
+        setTags(nextTags);
+        setPendingTag("");
+        const tagsChanged = isCreate() || JSON.stringify(nextTags) !== JSON.stringify(props.draft.tags);
         const input: SavePassInput = {
           scopeId: scope,
           recordName: props.draft.recordName ?? name,
@@ -161,6 +176,7 @@ export function ItemEditor(props: {
             title: name,
             urls: urls().map((entry) => entry.trim()).filter(Boolean),
             fields: writeNotes(fields(), notes()),
+            ...(tagsChanged ? { meta: { tags: nextTags } } : {}),
           },
         };
         await window.fd0.savePass(input);
@@ -305,6 +321,7 @@ export function ItemEditor(props: {
         </Show>
 
         <Show when={isPassword()}>
+          <TagInput value={tags()} pending={pendingTag()} options={tagOptions()} disabled={busy()} onChange={setTags} onPending={setPendingTag} />
           <PasswordCards
             fields={fields()}
             urls={urls()}

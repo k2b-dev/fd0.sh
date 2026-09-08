@@ -1,11 +1,12 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["node", "@playwright/test"]
+    "types": ["node", "@playwright/test", "vite/client"]
   },
   "include": [
     "playwright.config.ts",
     "src/renderer/src/global.d.ts",
-    "tests/app.e2e.ts"
+    "tests/app.e2e.ts",
+    "tests/fixtures/*.tsx"
   ]
 }

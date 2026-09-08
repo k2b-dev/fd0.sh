@@ -203,7 +203,7 @@ When fetching for a non-interactive context (e.g. CI script substitution, automa
 - item title and URL matchers
 - fields of type `text`, `secret`, `totp`, `passkey`, `file`, or `section`
 - recursive sections by slash path, up to four levels deep
-- per-item metadata for future GUI/autofill use
+- encrypted per-item metadata, including optional organization tags
 - small encrypted file attachments, capped at 32 KiB per file and 60 KiB per item
 
 Bare `fd0 pass` opens the interactive terminal browser. `fd0 pass QUERY` opens the same browser with an initial search. In the browser, secrets are masked by default; use the visible shortcuts for copy/reveal. `q` and `esc` quit/back out.
@@ -246,6 +246,32 @@ fd0 pass file export github SSH/recovery-key.pem --out ./recovery-key.pem
 ```
 
 Use `fd0 pass field set NAME PATH - --secret` for values that should not appear in shell history. A pass item is shared by sharing its scope; there is no separate per-item ACL. For browser/autofill-style lookup, use `fd0 pass find --url URL --json` and then retrieve the needed field explicitly.
+
+### Password tags
+
+Tags organize password items without changing permissions or URL matching.
+They are encrypted in the item and sync with it. Desktop accepts free text and
+suggests tags already used in the selected vault. Tags ignore capitalization,
+allow spaces, and are limited to 32 per item and 64 characters per tag.
+
+```sh
+fd0 pass add github --scope work --tag Development --tag "Team A"
+fd0 pass tags add github Server --scope work
+fd0 pass tags rm github "Team A" --scope work
+fd0 pass tags clear github --scope work
+fd0 pass tags list --scope work --json
+fd0 pass list --scope work --tag Development --tag Server
+fd0 pass find github --scope work --tag Development
+fd0 pass browse --scope work --tag Development
+fd0 pass list --scope work --untagged
+```
+
+Repeated filters require **all** tags. Do not combine `--tag` and `--untagged`.
+`tags list` returns existing tags and item counts grouped by scope; JSON rows
+contain `scopeId`, `scope`, `tag`, and `count`. `pass show` and list/find JSON
+include item tags. Default list/find columns are unchanged. Adding an existing
+tag or removing an absent tag does not create a new revision. Use explicit
+`--scope` when an item name could refer to multiple scopes.
 
 ## Browser autofill
 

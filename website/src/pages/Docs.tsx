@@ -513,6 +513,26 @@ const DesktopBody = () => (
       ))}
     </div>
 
+    <H2>Organize passwords with tags</H2>
+    <P>
+      Open a password for editing and use <strong>Tags</strong> to add labels
+      such as Work or Shopping. Type a label and press Enter, or choose a
+      suggestion from the selected vault. Tags can contain spaces. Use the
+      remove button on a tag to remove it, then save your changes.
+    </P>
+    <P>
+      Click a tag in an item's details, or open <strong>Tags</strong> above
+      the password list. Multiple selected tags match items that have all of
+      them. Combine tags with a vault, favorites, or search, and use{" "}
+      <strong>Without tags</strong> to find items you have not organized yet.
+      Remove active filter chips to widen the list again.
+    </P>
+    <P>
+      Tags are encrypted and sync with the password. They do not change who
+      can access it. You can use up to 32 tags per item, with 64 characters per
+      tag; capitalization does not create a separate tag.
+    </P>
+
     <H2>The app, screen by screen</H2>
     <div class="grid gap-5 mb-6">
     </div>
@@ -621,10 +641,38 @@ $ fd0 pass list --json`}</Box>
     <Cmd signature="fd0 pass show <name> [--reveal] [--json]" body="Print one item. Secrets are masked; --reveal prints them, --json prints the decrypted item." />
     <Cmd signature="fd0 pass copy <name> [<field>] [--clear-after 30s]" body="Copy a field to the clipboard and clear it again. Without a field it copies the password; on a TOTP field it copies the current code." />
     <Cmd signature="fd0 pass field get <name> <path> [--raw]" body="Print one field value to stdout. --raw drops the trailing newline, which is what scripts want." />
-    <Cmd signature="fd0 pass find [<query>] [--url <url>] [--json]" body="Match items by title or URL. --url is the browser-and-autofill lookup." />
+    <Cmd signature="fd0 pass find [<query>] [--url <url>] [--tag <tag>] [--json]" body="Match items by title, URL, or tag. --url keeps its URL-only matching rules; tags do not grant an origin access to a login." />
     <Cmd signature="fd0 pass file export <name> <path> [--out <file>]" body="Write an attached file back to disk. It refuses to overwrite unless you pass --force." />
     <Cmd signature="fd0 pass notes show|set|rm <name>" body="Read, replace, or remove the item's free-text note." />
     <Cmd signature="fd0 pass generate [--length 32] [--raw]" body="Generate a password without storing anything." />
+
+    <H2>Organize with tags</H2>
+    <P>
+      Add tags when creating an item with repeatable <Code>--tag</Code>{" "}
+      flags, or change them later with <Code>pass tags</Code>. Quote tags
+      containing spaces. Adding the same tag again has no effect.
+    </P>
+    <Box>{`$ fd0 pass add github --scope work --tag Development --tag "Team A"
+$ fd0 pass tags add github Server --scope work
+$ fd0 pass tags rm github "Team A" --scope work
+$ fd0 pass tags list --scope work --json
+$ fd0 pass list --scope work --tag Development --tag Server
+$ fd0 pass find github --scope work --tag Development
+$ fd0 pass browse --scope work --tag Development
+$ fd0 pass list --scope work --untagged
+$ fd0 pass tags clear github --scope work`}</Box>
+    <P>
+      <Code>tags list</Code> shows each tag and its item count per scope.
+      Repeat <Code>--tag</Code> to require all selected tags. Use{" "}
+      <Code>--untagged</Code> on its own to find items without tags. Tags
+      appear in <Code>pass show</Code> and list/find JSON output. The regular
+      list columns stay the same.
+    </P>
+    <P>
+      Tags sync with the item, including when you move it to another scope.
+      They organize passwords; sharing still comes from scope membership.
+      Desktop suggests existing tags from the selected vault as you type.
+    </P>
 
     <H2>Everything else is the shared grammar</H2>
     <P>

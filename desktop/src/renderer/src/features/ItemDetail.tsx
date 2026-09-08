@@ -351,6 +351,14 @@ function DetailContent(props: {
         <div class="detail-title">
           <h1>{item().title}</h1>
           <p>{props.raw ? "Raw stored record" : item().subtitle || kindMeta[item().kind].singular}</p>
+          <Show when={item().kind === "password" && !props.raw}>
+            <div class="detail-tags">
+              <For each={item().tags}>{(tag) => (
+                <button type="button" class="password-tag" aria-label={`Filter by tag ${tag}`}
+                  onClick={() => vault.updateFilters({ type: "password", tags: [tag], untagged: false })}>{tag}</button>
+              )}</For>
+            </div>
+          </Show>
         </div>
         <div class="detail-header-actions">
           <Show when={item().badge === "SSH HOST" && !props.raw}>

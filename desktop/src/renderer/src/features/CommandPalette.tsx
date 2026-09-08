@@ -73,7 +73,7 @@ export function CommandPalette(props: {
     }
 
     const itemHits = fuzzy.filter(needle, vault.inventory().items, {
-      key: (item) => `${item.title} ${item.subtitle ?? ""} ${item.vault} ${item.searchText ?? ""}`,
+      key: (item) => `${item.title} ${item.subtitle ?? ""} ${item.vault} ${item.searchText ?? ""} ${(item.tags ?? []).join(" ")}`,
       limit: 8,
     });
     const actionHits = fuzzy.filter(needle, props.actions, {

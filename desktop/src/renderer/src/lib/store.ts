@@ -1,3 +1,4 @@
+import { matchesItemTags, tagCatalog, tagKey } from "./tags";
 import { batch, createContext, createMemo, createSignal, useContext } from "solid-js";
 import type {
   Inventory,
@@ -21,6 +22,8 @@ export type Filters = {
   view: SmartView;
   type: TypeFilter;
   vault: string;
+  tags: string[];
+  untagged: boolean;
 };
 
 const emptyInventory: Inventory = { scopes: [], items: [], counts: {} };
@@ -32,7 +35,7 @@ export function createVaultStore() {
   const [detail, setDetail] = createSignal<ItemDetail | null>(null);
   const [selectedID, setSelectedID] = createSignal("");
   const [mainView, setMainView] = createSignal<MainView>("items");
-  const [filters, setFilters] = createSignal<Filters>({ view: "all", type: "all", vault: "" });
+  const [filters, setFilters] = createSignal<Filters>({ view: "all", type: "all", vault: "", tags: [], untagged: false });
   const [query, setQuery] = createSignal("");
   const [rawSecrets, setRawSecrets] = createSignal(false);
   const [loading, setLoading] = createSignal(true);
@@ -140,10 +143,11 @@ export function createVaultStore() {
     }
     if (current.vault) items = items.filter((item) => item.scopeId === current.vault);
 
+    items = items.filter((item) => matchesItemTags(item, current.tags, current.untagged));
     const needle = query().trim().toLocaleLowerCase();
     if (needle) {
       items = items.filter((item) =>
-        [item.title, item.subtitle, item.vault, item.badge, item.searchText].some((value) =>
+        [item.title, item.subtitle, item.vault, item.badge, item.searchText, ...(item.tags ?? [])].some((value) =>
           value?.toLocaleLowerCase().includes(needle),
         ),
       );
@@ -159,12 +163,12 @@ export function createVaultStore() {
     if (current.type !== "all" && !(current.type === "secret" && rawSecrets())) {
       items = items.filter((item) => item.kind === current.type);
     }
-    return items.length;
+    return items.filter((item) => matchesItemTags(item, current.tags, current.untagged)).length;
   });
 
   const activeFilterCount = createMemo(() => {
     const current = filters();
-    return (current.view !== "all" ? 1 : 0) + (current.type !== "all" ? 1 : 0) + (current.vault ? 1 : 0);
+    return (current.view !== "all" ? 1 : 0) + (current.type !== "all" ? 1 : 0) + (current.vault ? 1 : 0) + current.tags.length + (current.untagged ? 1 : 0);
   });
 
   const vaultCounts = createMemo(() => {
@@ -265,14 +269,27 @@ export function createVaultStore() {
   function updateFilters(next: Partial<Filters>): void {
     batch(() => {
       setMainView("items");
-      setFilters((current) => ({ ...current, ...next }));
+      setFilters((current) => {
+        const updated = { ...current, ...next };
+        if (next.type && next.type !== "password" && next.type !== "all") {
+          updated.tags = [];
+          updated.untagged = false;
+        }
+        if (next.untagged) updated.tags = [];
+        if (next.tags?.length) updated.untagged = false;
+        if (next.vault !== undefined && next.vault !== current.vault) {
+          const available = new Set(tagCatalog(inventory().items, next.vault).map((option) => tagKey(option.tag)));
+          updated.tags = updated.tags.filter((tag) => available.has(tagKey(tag)));
+        }
+        return updated;
+      });
     });
   }
 
   function resetFilters(): void {
     batch(() => {
       setMainView("items");
-      setFilters({ view: "all", type: "all", vault: "" });
+      setFilters({ view: "all", type: "all", vault: "", tags: [], untagged: false });
       setQuery("");
       setRawSecrets(false);
     });

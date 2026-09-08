@@ -7,6 +7,8 @@ import { initials, plural, prettyURL } from "../lib/format";
 import { useVault } from "../lib/store";
 import { Button, IconButton } from "../ui/Button";
 import { Switch } from "../ui/Fields";
+import { TagFilter } from "./TagFilter";
+import { tagKey } from "../lib/tags";
 
 /**
  * The item column.
@@ -45,6 +47,8 @@ export function ItemList(props: {
   const chips = createMemo(() => {
     const filters = vault.filters();
     const output: Array<{ id: string; label: string; tone?: string; clear(): void }> = [];
+    for (const tag of filters.tags) output.push({ id: `tag:${tagKey(tag)}`, label: tag, clear: () => vault.updateFilters({ tags: filters.tags.filter((value) => tagKey(value) !== tagKey(tag)) }) });
+    if (filters.untagged) output.push({ id: "untagged", label: "Without tags", clear: () => vault.updateFilters({ untagged: false }) });
     if (filters.view === "favorites") output.push({ id: "view", label: "Favorites", clear: () => vault.updateFilters({ view: "all" }) });
     if (filters.type !== "all") {
       output.push({ id: "type", label: kindMeta[filters.type].label, clear: () => vault.updateFilters({ type: "all" }) });
@@ -147,6 +151,7 @@ export function ItemList(props: {
           <h1>{heading()}</h1>
           <span class="column-count">{countLabel()}</span>
         </div>
+        <Show when={vault.filters().type === "password" || vault.filters().type === "all"}><TagFilter /></Show>
         <Show when={vault.filters().type === "secret"}>
           <Switch
             label="Show raw records"
@@ -277,6 +282,12 @@ function ItemRow(props: {
           </Show>
         </span>
         <span class="item-subtitle">{subtitle()}</span>
+        <Show when={!props.compact && isPassword() && props.item.tags?.length}>
+          <span class="item-tags">
+            <For each={props.item.tags?.slice(0, 2)}>{(tag) => <span class="password-tag">{tag}</span>}</For>
+            <Show when={(props.item.tags?.length ?? 0) > 2}><span class="tag-count">+{props.item.tags!.length - 2}</span></Show>
+          </span>
+        </Show>
       </span>
 
       {/* Quick actions: the reason a password manager exists is retrieving a

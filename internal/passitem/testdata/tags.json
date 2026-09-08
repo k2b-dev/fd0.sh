@@ -1,0 +1,8 @@
+[
+  {"input": [" Work ", "work", "Team A", "Team A"], "tags": ["Work", "Team A"], "keys": ["work", "team a"]},
+  {"input": ["Café", "CAFÉ", "Ärger", "ärger"], "tags": ["Café", "Ärger"], "keys": ["café", "ärger"]},
+  {"input": ["Σ", "σ", "ς", "İ", "i", "ı"], "tags": ["Σ", "İ"], "keys": ["σ", "i"]},
+  {"input": ["Straße", "STRAẞE", "STRASSE", "ſerver", "Server"], "tags": ["Straße", "STRASSE", "ſerver"], "keys": ["straße", "strasse", "server"]},
+  {"input": ["A,B", " hello world ", "🔑"], "tags": ["A,B", "hello world", "🔑"], "keys": ["a,b", "hello world", "🔑"]},
+  {"input": [], "tags": [], "keys": []}
+]

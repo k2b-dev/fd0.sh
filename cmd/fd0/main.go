@@ -346,10 +346,11 @@ type sftpRemoveCmd struct {
 
 // ───── pass ───────────────────────────────────────────────────────────
 type passCmd struct {
+	Tags     passTagsCmd     `cmd:"" help:"Organize password items with tags."`
 	Browse   passBrowseCmd   `cmd:"" default:"withargs" help:"Open the interactive pass browser."`
 	Add      passAddCmd      `cmd:"" help:"Create a pass item."`
 	Edit     passEditCmd     `cmd:"" help:"Change an item's title or URLs."`
-	Find     passFindCmd     `cmd:"" help:"Find pass items by title or URL."`
+	Find     passFindCmd     `cmd:"" help:"Find pass items by title, URL, or tag."`
 	List     passListCmd     `cmd:"" aliases:"ls" help:"List pass items."`
 	Show     passShowCmd     `cmd:"" help:"Show a pass item with secrets masked by default."`
 	Rename   passRenameCmd   `cmd:"" help:"Rename a pass item."`
@@ -372,11 +373,14 @@ type passMoveCmd struct {
 }
 
 type passBrowseCmd struct {
-	Query      string `arg:"" optional:"" help:"Initial search query."`
-	Scope      string `name:"scope" help:"Scope label or id."`
-	ClearAfter string `name:"clear-after" help:"Override clipboard clear delay."`
+	Tag        []string `name:"tag" sep:"none" xor:"tag-filter" help:"Require this tag (repeatable; all must match)."`
+	Untagged   bool     `name:"untagged" xor:"tag-filter" help:"Only items without tags."`
+	Query      string   `arg:"" optional:"" help:"Initial search query."`
+	Scope      string   `name:"scope" help:"Scope label or id."`
+	ClearAfter string   `name:"clear-after" help:"Override clipboard clear delay."`
 }
 type passAddCmd struct {
+	Tag   []string `name:"tag" sep:"none" help:"Add a tag (repeatable)."`
 	Name  string   `arg:"" help:"Item name."`
 	URL   []string `name:"url" help:"Login URL or matching URL (repeatable)."`
 	Scope string   `name:"scope" help:"Scope label or id."`
@@ -396,14 +400,18 @@ type passRenameCmd struct {
 	Force bool   `name:"force" help:"Overwrite an existing pass item with the new name."`
 }
 type passFindCmd struct {
-	Query string `arg:"" optional:"" help:"Text to match against title and URLs."`
-	URL   string `name:"url" help:"URL to match for browser/autofill lookups."`
-	Scope string `name:"scope" help:"Scope label or id."`
-	JSON  bool   `name:"json" help:"Print JSON."`
+	Tag      []string `name:"tag" sep:"none" xor:"tag-filter" help:"Require this tag (repeatable; all must match)."`
+	Untagged bool     `name:"untagged" xor:"tag-filter" help:"Only items without tags."`
+	Query    string   `arg:"" optional:"" help:"Text to match against title, URLs and tags."`
+	URL      string   `name:"url" help:"URL to match for browser/autofill lookups."`
+	Scope    string   `name:"scope" help:"Scope label or id."`
+	JSON     bool     `name:"json" help:"Print JSON."`
 }
 type passListCmd struct {
-	Scope string `name:"scope" help:"Scope label or id."`
-	JSON  bool   `name:"json" help:"Print JSON."`
+	Tag      []string `name:"tag" sep:"none" xor:"tag-filter" help:"Require this tag (repeatable; all must match)."`
+	Untagged bool     `name:"untagged" xor:"tag-filter" help:"Only items without tags."`
+	Scope    string   `name:"scope" help:"Scope label or id."`
+	JSON     bool     `name:"json" help:"Print JSON."`
 }
 type passShowCmd struct {
 	Name   string `arg:"" help:"Item name."`
@@ -1377,10 +1385,19 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		if err != nil {
 			return err
 		}
-		return cli.RunPassBrowse(ctx, c.Pass.Browse.Scope, c.Pass.Browse.Query, clearAfter)
+		return cli.RunPassBrowse(ctx, c.Pass.Browse.Scope, c.Pass.Browse.Query, clearAfter, cli.PassTagFilter{Tags: c.Pass.Browse.Tag, Untagged: c.Pass.Browse.Untagged})
+	case "pass tags add <name> <tags>":
+		return cli.RunPassTagsChange(ctx, c.Pass.Tags.Add.Scope, c.Pass.Tags.Add.Name, "add", c.Pass.Tags.Add.Tags)
+	case "pass tags rm <name> <tags>":
+		return cli.RunPassTagsChange(ctx, c.Pass.Tags.Rm.Scope, c.Pass.Tags.Rm.Name, "rm", c.Pass.Tags.Rm.Tags)
+	case "pass tags clear <name>":
+		return cli.RunPassTagsChange(ctx, c.Pass.Tags.Clear.Scope, c.Pass.Tags.Clear.Name, "clear", nil)
+	case "pass tags list":
+		return cli.RunPassTagsList(ctx, c.Pass.Tags.List.Scope, c.Pass.Tags.List.JSON)
 	case "pass add <name>":
 		return cli.RunPassAdd(ctx, cli.PassAddOpts{
 			Name:  c.Pass.Add.Name,
+			Tags:  c.Pass.Add.Tag,
 			URL:   c.Pass.Add.URL,
 			Scope: c.Pass.Add.Scope,
 			Force: c.Pass.Add.Force,
@@ -1394,9 +1411,9 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 			URLs:  c.Pass.Edit.URL.Ptr(),
 		})
 	case "pass find", "pass find <query>":
-		return cli.RunPassFind(ctx, c.Pass.Find.Scope, c.Pass.Find.Query, c.Pass.Find.URL, c.Pass.Find.JSON)
+		return cli.RunPassFind(ctx, c.Pass.Find.Scope, c.Pass.Find.Query, c.Pass.Find.URL, c.Pass.Find.JSON, cli.PassTagFilter{Tags: c.Pass.Find.Tag, Untagged: c.Pass.Find.Untagged})
 	case "pass list", "pass ls":
-		return cli.RunPassList(ctx, c.Pass.List.Scope, c.Pass.List.JSON)
+		return cli.RunPassList(ctx, c.Pass.List.Scope, c.Pass.List.JSON, cli.PassTagFilter{Tags: c.Pass.List.Tag, Untagged: c.Pass.List.Untagged})
 	case "pass show <name>":
 		return cli.RunPassShow(ctx, c.Pass.Show.Scope, c.Pass.Show.Name, c.Pass.Show.Reveal, c.Pass.Show.JSON)
 	case "pass rename <name> <new-name>":

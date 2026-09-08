@@ -2277,3 +2277,30 @@ h1, h2, h3, p { margin: 0; }
 
 .spinning { animation: files-spin .8s linear infinite; }
 @keyframes files-spin { to { transform: rotate(360deg); } }
+/* Password tags use the same surface and focus tokens as other controls. */
+.tag-field { display: grid; gap: var(--space-2); min-width: 0; }
+.tag-input-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 1px solid var(--line-control); border-radius: var(--radius); background: var(--field-bg); }
+.tag-input-wrap:focus-within { border-color: var(--accent); }
+.tag-input-wrap input { flex: 1; min-width: 8em; width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; padding: var(--space-1); }
+.password-tag { display: inline-flex; align-items: center; gap: var(--space-1); max-width: 100%; padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2); background: var(--surface-raised); font-size: var(--text-xs); line-height: 1.3; overflow-wrap: anywhere; }
+button.password-tag { cursor: pointer; }
+button.password-tag:hover { background: var(--surface-hover); }
+.tag-edit-chip button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; padding: var(--space-1); border: 0; background: transparent; color: inherit; border-radius: var(--radius-sm); cursor: pointer; }
+.tag-edit-chip button:hover { background: var(--surface-hover); }
+.tag-edit-chip button:disabled, .tag-input-wrap input:disabled { opacity: .5; cursor: default; }
+.tag-edit-chip button:focus-visible, button.password-tag:focus-visible, .tag-filter input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.detail-tags, .item-tags { display: flex; gap: var(--space-1); min-width: 0; margin-top: var(--space-1); }
+.detail-tags { flex-wrap: wrap; }
+.detail-tags:empty { display: none; }
+.item-tags { align-items: center; overflow: hidden; }
+.item-tags .password-tag { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tag-count { flex-shrink: 0; color: var(--text-3); font-size: var(--text-xs); }
+.tag-options { max-width: calc(100vw - var(--space-4)); }
+.tag-option { display: flex; width: 100%; padding: var(--space-2) var(--space-3); border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.tag-option:hover, .tag-option.is-active { background: var(--surface-hover); }
+.tag-options-empty { padding: var(--space-2); color: var(--text-3); }
+.tag-filter { width: min(20rem, calc(100vw - var(--space-4))); padding: var(--space-3); }
+.tag-filter input[type="search"] { width: 100%; margin-block: var(--space-2); padding: var(--space-2); border: 1px solid var(--line-control); border-radius: var(--radius); background: var(--field-bg); color: var(--text); font: inherit; }
+.tag-filter-option { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2); color: var(--text); cursor: pointer; overflow-wrap: anywhere; }
+.tag-filter-option span:first-of-type { flex: 1; min-width: 0; }
+.tag-filter-option input { accent-color: var(--accent); }

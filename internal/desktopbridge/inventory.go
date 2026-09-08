@@ -38,18 +38,19 @@ const (
 )
 
 type ItemSummary struct {
-	ID         string `json:"id"`
-	ScopeID    string `json:"scopeId"`
-	RecordName string `json:"recordName"`
-	Kind       string `json:"kind"`
-	Title      string `json:"title"`
-	Subtitle   string `json:"subtitle,omitempty"`
-	Vault      string `json:"vault"`
-	Badge      string `json:"badge"`
-	UpdatedAt  string `json:"updatedAt,omitempty"`
-	Favorite   bool   `json:"favorite,omitempty"`
-	SearchText string `json:"searchText,omitempty"`
-	HasTOTP    bool   `json:"hasTOTP,omitempty"`
+	ID         string   `json:"id"`
+	ScopeID    string   `json:"scopeId"`
+	RecordName string   `json:"recordName"`
+	Kind       string   `json:"kind"`
+	Title      string   `json:"title"`
+	Subtitle   string   `json:"subtitle,omitempty"`
+	Vault      string   `json:"vault"`
+	Badge      string   `json:"badge"`
+	UpdatedAt  string   `json:"updatedAt,omitempty"`
+	Favorite   bool     `json:"favorite,omitempty"`
+	SearchText string   `json:"searchText,omitempty"`
+	HasTOTP    bool     `json:"hasTOTP,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
 }
 
 type RecordRef struct {
@@ -292,6 +293,7 @@ func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary,
 		}
 		summary.UpdatedAt = metaString(item.Meta, "updated_at")
 		summary.Favorite = metaBool(item.Meta, "favorite")
+		summary.Tags = item.Tags()
 		summary.SearchText, summary.HasTOTP = passSearchMetadata(item)
 	case sshhost.TypeHost:
 		var wire sshhost.JSON
@@ -356,6 +358,7 @@ func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary,
 
 func passSearchMetadata(item *passitem.Item) (string, bool) {
 	parts := append([]string{item.Title}, item.URLs...)
+	parts = append(parts, item.Tags()...)
 	hasTOTP := false
 	var visit func([]passitem.Field)
 	visit = func(fields []passitem.Field) {

@@ -1,3 +1,4 @@
+import { readTags } from "./lib/tags";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { IconArrowLeft } from "@tabler/icons-solidjs";
 import { hotkeys } from "@k2b/stdlib/solid";
@@ -105,6 +106,7 @@ function App(): JSX.Element {
             authorization: input.authorization,
             title: input.item.title,
             urls: input.item.urls ?? [],
+            tags: readTags(input.item.meta),
             fields: input.item.fields ?? [],
           });
         })
@@ -202,6 +204,7 @@ function App(): JSX.Element {
             ...emptyDraft("password", input.scopeId),
             title,
             urls: [...(input.item.urls ?? [])],
+            tags: readTags(input.item.meta),
             fields: structuredClone(input.item.fields ?? []),
           });
         })

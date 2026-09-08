@@ -28,6 +28,7 @@ type PassAddOpts struct {
 	Scope string
 	Force bool
 	Notes string
+	Tags  []string
 }
 
 type PassNotesSetOpts struct {
@@ -77,6 +78,9 @@ func RunPassAdd(ctx context.Context, o PassAddOpts) error {
 		return err
 	}
 	item := passitem.New(name, o.URL)
+	if _, err := item.SetTags(o.Tags); err != nil {
+		return err
+	}
 	// SetNotes is a no-op for "", so the flag stays optional.
 	if err := item.SetNotes(o.Notes); err != nil {
 		return err
@@ -92,7 +96,11 @@ func RunPassAdd(ctx context.Context, o PassAddOpts) error {
 	return nil
 }
 
-func RunPassList(ctx context.Context, scopeID string, jsonOut bool) error {
+func RunPassList(ctx context.Context, scopeID string, jsonOut bool, filter PassTagFilter) error {
+	filter, err := filter.validate()
+	if err != nil {
+		return err
+	}
 	s, err := Open(ctx)
 	if err != nil {
 		return err
@@ -102,6 +110,7 @@ func RunPassList(ctx context.Context, scopeID string, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
+	items = filterPassTags(items, filter)
 	if jsonOut {
 		return json.NewEncoder(os.Stdout).Encode(passSummaryRows(s, items))
 	}
@@ -119,7 +128,11 @@ func RunPassList(ctx context.Context, scopeID string, jsonOut bool) error {
 	return nil
 }
 
-func RunPassFind(ctx context.Context, scopeID, query, rawURL string, jsonOut bool) error {
+func RunPassFind(ctx context.Context, scopeID, query, rawURL string, jsonOut bool, filter PassTagFilter) error {
+	filter, err := filter.validate()
+	if err != nil {
+		return err
+	}
 	s, err := Open(ctx)
 	if err != nil {
 		return err
@@ -129,6 +142,7 @@ func RunPassFind(ctx context.Context, scopeID, query, rawURL string, jsonOut boo
 	if err != nil {
 		return err
 	}
+	items = filterPassTags(items, filter)
 	var matches []passRow
 	for _, it := range items {
 		if passMatches(it.Item, query, rawURL) {
@@ -152,7 +166,11 @@ func RunPassFind(ctx context.Context, scopeID, query, rawURL string, jsonOut boo
 	return nil
 }
 
-func RunPassBrowse(ctx context.Context, scopeID, query string, clearAfter time.Duration) error {
+func RunPassBrowse(ctx context.Context, scopeID, query string, clearAfter time.Duration, filter PassTagFilter) error {
+	filter, err := filter.validate()
+	if err != nil {
+		return err
+	}
 	if !IsTTY(os.Stdin) || !IsTTY(os.Stderr) {
 		return errors.New("interactive pass browser requires a TTY (or use `fd0 pass list` / `fd0 pass show NAME`)")
 	}
@@ -165,6 +183,7 @@ func RunPassBrowse(ctx context.Context, scopeID, query string, clearAfter time.D
 	if err != nil {
 		return err
 	}
+	items = filterPassTags(items, filter)
 	if len(items) == 0 {
 		fmt.Fprintln(os.Stderr, "(no pass items)")
 		return nil
@@ -245,6 +264,9 @@ func RunPassShow(ctx context.Context, scopeID, name string, reveal, jsonOut bool
 // particular the notes block — is testable without capturing os.Stdout.
 func renderPassItem(w io.Writer, item *passitem.Item, scopeLabel string, reveal bool) {
 	fmt.Fprintf(w, "%s  [scope: %s]\n", item.Title, scopeLabel)
+	if tags := item.Tags(); len(tags) > 0 {
+		fmt.Fprintf(w, "  tags      %s\n", strings.Join(tags, ", "))
+	}
 	for _, u := range item.URLs {
 		fmt.Fprintf(w, "  url       %s\n", u)
 	}
@@ -890,6 +912,7 @@ type passSummaryRow struct {
 	Title   string             `json:"title"`
 	URLs    []string           `json:"urls,omitempty"`
 	Fields  []passSummaryField `json:"fields,omitempty"`
+	Tags    []string           `json:"tags,omitempty"`
 }
 
 type passSummaryField struct {
@@ -911,6 +934,7 @@ func passSummaryRows(s *Session, rows []passRow) []passSummaryRow {
 			Title:   row.Item.Title,
 			URLs:    append([]string(nil), row.Item.URLs...),
 			Fields:  passSummaryFields(row.Item.Fields, ""),
+			Tags:    row.Item.Tags(),
 		}
 	}
 	return out
@@ -938,6 +962,7 @@ func passBrowserID(r passRow) string {
 func passBrowserSearchText(r passRow, scopeLabel string) string {
 	parts := []string{r.Item.Title, r.DisplayName(), scopeLabel, r.ScopeID}
 	parts = append(parts, r.Item.URLs...)
+	parts = append(parts, r.Item.Tags()...)
 	return strings.Join(parts, " ")
 }
 
@@ -1013,6 +1038,11 @@ func passMatches(item *passitem.Item, query, rawURL string) bool {
 	}
 	if strings.Contains(strings.ToLower(item.Title), query) {
 		return true
+	}
+	for _, tag := range item.Tags() {
+		if strings.Contains(passitem.TagKey(tag), passitem.TagKey(query)) {
+			return true
+		}
 	}
 	for _, u := range item.URLs {
 		if strings.Contains(strings.ToLower(u), query) {
