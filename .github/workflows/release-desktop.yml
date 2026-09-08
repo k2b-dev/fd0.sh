@@ -309,8 +309,12 @@ jobs:
           chmod +x "$app"
           test "$("$app" --fd0-cli-relay version)" = "fd0 ${GITHUB_REF_NAME#desktop-v} yubikey"
           test "$("$app" --fd0-agent-relay --version)" = "fd0-agent ${GITHUB_REF_NAME#desktop-v} yubikey"
+          # Match the managed service's NoNewPrivileges setting (issue #20).
+          test "$(APPIMAGE_EXTRACT_AND_RUN=1 setpriv --no-new-privs "$app" --fd0-cli-relay version)" = "fd0 ${GITHUB_REF_NAME#desktop-v} yubikey"
+          test "$(APPIMAGE_EXTRACT_AND_RUN=1 setpriv --no-new-privs "$app" --fd0-agent-relay --version)" = "fd0-agent ${GITHUB_REF_NAME#desktop-v} yubikey"
           {
             echo "native AppImage: pass"
+            echo "AppImage with NoNewPrivileges and extraction: pass"
             echo "architecture: ${{ matrix.arch }}"
             echo "runner: ${{ matrix.runner }}"
           } > "linux-clean-${{ matrix.arch }}.txt"
