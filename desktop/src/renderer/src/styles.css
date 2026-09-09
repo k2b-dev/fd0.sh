@@ -98,7 +98,9 @@ h1, h2, h3, p { margin: 0; }
   background: var(--detail-pane-bg);
 }
 
-.detail-back { display: none; }
+.detail-back { display: flex; align-items: center; padding: var(--space-2) var(--space-2) 0; }
+.detail-back .button { min-width: 0; max-width: 100%; }
+.detail-back .button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /*
  * Below 720px the list and the detail share one column and the back button
@@ -107,11 +109,6 @@ h1, h2, h3, p { margin: 0; }
 .app.is-narrow .workspace { grid-template-columns: minmax(0, 1fr); }
 .app.is-narrow.pane-list .detail-pane { display: none; }
 .app.is-narrow.pane-detail .item-column { display: none; }
-.app.is-narrow .detail-back {
-  display: flex;
-  align-items: center;
-  padding: var(--space-2) var(--space-2) 0;
-}
 
 .boot-screen {
   display: grid;

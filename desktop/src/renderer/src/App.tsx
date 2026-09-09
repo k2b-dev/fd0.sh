@@ -1,6 +1,5 @@
 import { readTags } from "./lib/tags";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { IconArrowLeft } from "@tabler/icons-solidjs";
 import { hotkeys } from "@k2b/stdlib/solid";
 import type { FieldView, ItemSummary, ScopeSummary } from "../../shared/contracts";
 import { PasswordGeneratorPanel } from "./components/PasswordGenerator";
@@ -8,6 +7,7 @@ import { ShareVaultModal } from "./components/ShareVaultModal";
 import { CommandPalette, buildActions } from "./features/CommandPalette";
 import { CreateVaultModal, MoveItemModal, RecoveryExportModal, RenameItemModal } from "./features/EditorModals";
 import { ItemEditor, ItemTypePicker, emptyDraft, type ItemDraft } from "./features/ItemEditor";
+import { DetailNavigation } from "./features/DetailNavigation";
 import { ItemDetail } from "./features/ItemDetail";
 import { ItemList } from "./features/ItemList";
 import { LargeType } from "./features/LargeType";
@@ -28,7 +28,6 @@ import {
 } from "./lib/readiness-snooze";
 import { VaultContext, createVaultStore } from "./lib/store";
 import { activateTheme, storeTheme } from "./lib/theme";
-import { IconButton } from "./ui/Button";
 import { ErrorStack, SafetyBanner, Toasts } from "./ui/Notices";
 
 /** Below this width the list and the detail share one column. */
@@ -84,8 +83,7 @@ function App(): JSX.Element {
   }
 
   function openItem(item: ItemSummary): void {
-    vault.selectItem(item);
-    vault.setMainView("items");
+    vault.jumpToItem(item);
     if (narrow()) setNarrowPane("detail");
   }
 
@@ -511,13 +509,7 @@ function App(): JSX.Element {
                     onCreate={() => openAddItem()}
                   />
                   <div class="detail-pane">
-                    <Show when={narrow()}>
-                      <div class="detail-back">
-                        <IconButton label="Back to the list" onClick={() => setNarrowPane("list")}>
-                          <IconArrowLeft size={17} />
-                        </IconButton>
-                      </div>
-                    </Show>
+                    <DetailNavigation narrow={narrow()} onShowList={() => setNarrowPane("list")} />
                     <ItemDetail
                       onEdit={openEditor}
                 onDuplicate={openDuplicate}

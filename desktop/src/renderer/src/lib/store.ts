@@ -38,6 +38,7 @@ export function createVaultStore() {
   const [filters, setFilters] = createSignal<Filters>({ view: "all", type: "all", vault: "", tags: [], untagged: false });
   const [query, setQuery] = createSignal("");
   const [rawSecrets, setRawSecrets] = createSignal(false);
+  const [backStack, setBackStack] = createSignal<Array<{ id: string; filters: Filters; query: string; raw: boolean }>>([]);
   const [loading, setLoading] = createSignal(true);
   const [detailLoading, setDetailLoading] = createSignal(false);
   const [syncing, setSyncing] = createSignal(false);
@@ -131,6 +132,8 @@ export function createVaultStore() {
   // ---------------------------------------------------------------- derived
 
   const selectedItem = createMemo(() => inventory().items.find((item) => item.id === selectedID()));
+  const backEntry = createMemo(() => backStack().findLast((entry) => inventory().items.some((item) => item.id === entry.id)));
+  const backItem = createMemo(() => inventory().items.find((item) => item.id === backEntry()?.id));
 
   const visibleItems = createMemo(() => {
     const current = filters();
@@ -196,6 +199,7 @@ export function createVaultStore() {
           setInventory(emptyInventory);
           setDetail(null);
           setSelectedID("");
+          setBackStack([]);
         });
         return undefined;
       }
@@ -231,6 +235,7 @@ export function createVaultStore() {
         setInventory(emptyInventory);
         setDetail(null);
         setSelectedID("");
+        setBackStack([]);
       });
     } catch (cause) {
       fail(cause, "fd0 lost contact with the local service");
@@ -263,11 +268,49 @@ export function createVaultStore() {
   }
 
   function selectItem(item: ItemSummary): void {
+    setBackStack([]);
     setSelectedID(item.id);
+  }
+
+  /** Global results and related items must remain visible to list reconciliation. */
+  function jumpToItem(item: ItemSummary): void {
+    if (!inventory().items.some((candidate) => candidate.id === item.id)) return;
+    batch(() => {
+      if (selectedItem() && selectedID() !== item.id) {
+        setBackStack((entries) => [...entries, { id: selectedID(), filters: { ...filters(), tags: [...filters().tags] }, query: query(), raw: rawSecrets() }].slice(-20));
+      }
+      if (!visibleItems().some((candidate) => candidate.id === item.id) || rawSecrets()) {
+        setFilters({ view: "all", type: item.kind, vault: item.scopeId, tags: [], untagged: false });
+        setQuery("");
+        setRawSecrets(false);
+      }
+      setMainView("items");
+      setSelectedID(item.id);
+    });
+  }
+
+  function goBack(): void {
+    const entry = backEntry();
+    const item = backItem();
+    if (!entry || !item) return;
+    batch(() => {
+      setBackStack((entries) => entries.slice(0, entries.indexOf(entry)));
+      setFilters({ ...entry.filters, tags: [...entry.filters.tags] });
+      setQuery(entry.query);
+      setRawSecrets(entry.raw);
+      // A sync may have changed the item's tags, title or favorite state.
+      if (!visibleItems().some((candidate) => candidate.id === entry.id)) {
+        setFilters({ view: "all", type: item.kind, vault: item.scopeId, tags: [], untagged: false });
+        setQuery("");
+      }
+      setMainView("items");
+      setSelectedID(entry.id);
+    });
   }
 
   function updateFilters(next: Partial<Filters>): void {
     batch(() => {
+      setBackStack([]);
       setMainView("items");
       setFilters((current) => {
         const updated = { ...current, ...next };
@@ -288,6 +331,7 @@ export function createVaultStore() {
 
   function resetFilters(): void {
     batch(() => {
+      setBackStack([]);
       setMainView("items");
       setFilters({ view: "all", type: "all", vault: "", tags: [], untagged: false });
       setQuery("");
@@ -303,6 +347,7 @@ export function createVaultStore() {
         setInventory(emptyInventory);
         setDetail(null);
         setSelectedID("");
+        setBackStack([]);
         clearErrors();
       });
     } catch (cause) {
@@ -432,8 +477,8 @@ export function createVaultStore() {
     selectedID, setSelectedID,
     mainView, setMainView,
     filters, updateFilters, resetFilters,
-    query, setQuery,
-    rawSecrets, setRawSecrets,
+    query, setQuery: (value: string) => batch(() => { setBackStack([]); setQuery(value); }),
+    rawSecrets, setRawSecrets: (value: boolean) => batch(() => { setBackStack([]); setRawSecrets(value); }),
     loading, setLoading,
     detailLoading,
     syncing,
@@ -444,7 +489,7 @@ export function createVaultStore() {
     // derived
     selectedItem, visibleItems, scopeTotal, activeFilterCount, vaultCounts, isEmptyVault, needsRecovery,
     // actions
-    refresh, checkLockState, loadDetail, selectItem, lock, sync, copyField, copyFromItem, removeItem, toggleFavorite,
+    refresh, checkLockState, loadDetail, selectItem, jumpToItem, goBack, backItem, lock, sync, copyField, copyFromItem, removeItem, toggleFavorite,
   };
 }
 
