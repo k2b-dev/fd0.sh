@@ -181,6 +181,7 @@ type UnlockResp struct {
 
 // StatusResp reports current state. SuperPub is empty when locked.
 type StatusResp struct {
+	UnlockSession  string `cbor:"unlock_session,omitempty"` // Changes on every unlock, including within one second.
 	Unlocked       bool   `cbor:"unlocked"`
 	SinceUnix      int64  `cbor:"since,omitempty"`
 	UserSuperPub   []byte `cbor:"user_super_pub,omitempty"`

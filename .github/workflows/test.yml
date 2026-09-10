@@ -44,6 +44,9 @@ jobs:
       - name: test
         run: go test -race -coverprofile=coverage.out ./...
 
+      - name: test isolated organization and restricted agent access
+        run: bash tests/run_isolated_integration.sh tests/integration_organization.sh
+
       - name: coverage summary
         if: matrix.os == 'ubuntu-latest'
         run: go tool cover -func=coverage.out | tail -5

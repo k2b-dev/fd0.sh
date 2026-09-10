@@ -113,6 +113,11 @@ add `--global` to use the skill across projects. The skill contains instructions
 fd0 itself and an initialized vault are still required. Normal vault access and
 unlock requirements apply. See the [agent skill setup](https://fd0.sh/docs/install#agent-skill).
 
+For tags across all item types, reviewed bulk changes, and scope moves, see the
+[organization guide](skills/fd0/references/organization.md). An agent that must
+not see values needs the restricted organization tools and no other access to
+credentials. Installing a skill alone does not enforce that boundary.
+
 ## Learn fd0
 
 - [Install Desktop, CLI, and agent](https://fd0.sh/docs/install)

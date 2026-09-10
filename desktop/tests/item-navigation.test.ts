@@ -87,3 +87,40 @@ test("Back handles changed metadata and restores raw projection without self loo
   await page.getByRole("button", { name: "Back to Renamed", exact: true }).click();
   expect(await page.evaluate(() => window.navigationTest.state())).toMatchObject({ selected: "Login", raw: true, back: undefined });
 }));
+
+test("tags edit secrets and hosts without exposing fields and keep host tag casing", () => withPage(async (page) => {
+  await page.evaluate(() => window.navigationTest.jump("API token"));
+  await page.getByRole("button", { name: "Edit tags", exact: true }).click();
+  let input = page.getByRole("combobox", { name: /Tags/ });
+  await input.fill("Production"); await input.press("Enter");
+  await page.getByRole("button", { name: "Save tags", exact: true }).click();
+  expect(await page.getByRole("button", { name: "Filter by tag Production", exact: true }).count()).toBe(1);
+  await page.evaluate(() => window.navigationTest.jump("Host"));
+  await page.getByRole("button", { name: "Edit tags", exact: true }).click();
+  input = page.getByRole("combobox", { name: /Tags/ });
+  await input.fill("Prod"); await input.press("Enter");
+  await input.fill("prod"); await input.press("Enter");
+  await input.fill("bad,tag");
+  expect(await page.getByRole("alert").count()).toBeGreaterThan(0);
+  await input.fill("");
+  await page.getByRole("button", { name: "Save tags", exact: true }).click();
+  expect(await page.getByRole("button", { name: "Filter by tag Prod", exact: true }).count()).toBe(1);
+  expect(await page.getByRole("button", { name: "Filter by tag prod", exact: true }).count()).toBe(1);
+  await page.getByRole("button", { name: "Filter by tag prod", exact: true }).click();
+  expect(await page.evaluate(() => window.navigationTest.state().selected)).toBe("Host");
+}));
+
+
+test("bulk organization previews a fixed cross-type selection before applying", () => withPage(async page => {
+ await page.getByRole("button", { name:"Organize", exact:true }).click();
+ const modal = page.getByRole("dialog", { name:"Organize items", exact:true });
+ await modal.getByRole("button", { name:"Select first 4", exact:true }).click();
+ const tags = modal.getByRole("combobox", { name:/Tags/ });
+ await tags.fill("Operations"); await tags.press("Enter");
+ await modal.getByRole("button", { name:"Review changes", exact:true }).click();
+ expect(await page.evaluate(() => window.navigationTest.batches().map(call => call.dryRun))).toEqual([true]);
+ expect(await modal.getByText("Operations", { exact:false }).count()).toBe(4);
+ await modal.getByRole("button", { name:"Apply reviewed changes", exact:true }).click();
+ await modal.waitFor({ state:"hidden" });
+ expect(await page.evaluate(() => window.navigationTest.batches().map(call => ({ dryRun:call.dryRun, count:call.items.length })))).toEqual([{dryRun:true,count:4},{dryRun:false,count:4}]);
+}));

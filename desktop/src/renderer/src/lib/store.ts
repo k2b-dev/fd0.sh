@@ -1,4 +1,4 @@
-import { matchesItemTags, tagCatalog, tagKey } from "./tags";
+import { matchesItemTags } from "./tags";
 import { batch, createContext, createMemo, createSignal, useContext } from "solid-js";
 import type {
   Inventory,
@@ -314,15 +314,11 @@ export function createVaultStore() {
       setMainView("items");
       setFilters((current) => {
         const updated = { ...current, ...next };
-        if (next.type && next.type !== "password" && next.type !== "all") {
-          updated.tags = [];
-          updated.untagged = false;
-        }
         if (next.untagged) updated.tags = [];
         if (next.tags?.length) updated.untagged = false;
         if (next.vault !== undefined && next.vault !== current.vault) {
-          const available = new Set(tagCatalog(inventory().items, next.vault).map((option) => tagKey(option.tag)));
-          updated.tags = updated.tags.filter((tag) => available.has(tagKey(tag)));
+          updated.tags = updated.tags.filter((tag) => inventory().items.some((item) =>
+            (!next.vault || item.scopeId === next.vault) && matchesItemTags(item, [tag], false)));
         }
         return updated;
       });

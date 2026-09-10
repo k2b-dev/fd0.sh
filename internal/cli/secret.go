@@ -185,9 +185,11 @@ func RunSecretSet(ctx context.Context, scopeID, name, value string) error {
 	}
 	// Find existing id by name; else mint a new one.
 	var sid string
+	var previous *proto.SecretRecord
 	for id, cur := range st.SecretIndex {
 		if cur.Record != nil && cur.Record.Name == name {
 			sid = id
+			previous = cur.Record
 			break
 		}
 	}
@@ -195,14 +197,8 @@ func RunSecretSet(ctx context.Context, scopeID, name, value string) error {
 		sid = "s_" + ulid.Make().String()
 	}
 	body := &proto.SecretBody{
-		ID: sid,
-		Record: &proto.SecretRecord{
-			Name:          name,
-			Type:          "kv.string",
-			SchemaVersion: 1,
-			Payload:       value,
-			Tags:          map[string]string{},
-		},
+		ID:     sid,
+		Record: preservedRecord(previous, name, "kv.string", value),
 	}
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub, proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
 	if err != nil {
@@ -690,4 +686,17 @@ func wipe(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
+}
+
+// SavePlainSecret writes a literal value for trusted clients without interpreting
+// '-' as stdin or JSON-encoding the string like a typed item payload.
+func (s *Session) SavePlainSecret(ctx context.Context, scope, name, value string, create bool) error {
+	if err := ValidatePlainSecretName(name); err != nil {
+		return err
+	}
+	expectedType := "kv.string"
+	if create {
+		expectedType = ""
+	}
+	return s.writeTypedSecretPayload(ctx, scope, name, "kv.string", value, create, expectedType)
 }

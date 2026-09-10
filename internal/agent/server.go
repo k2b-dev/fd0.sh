@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -76,6 +77,7 @@ type Server struct {
 	userSuperPub  []byte
 	redactedBody  []byte // cached cbor(VaultBody) with super_priv zeroed
 	unlockedAt    time.Time
+	unlockSession string
 	lastActivity  time.Time
 	lifecycleWake chan struct{}
 }
@@ -399,6 +401,7 @@ func (s *Server) handleStatus() *Response {
 	}
 	if st.Unlocked {
 		st.SinceUnix = s.unlockedAt.Unix()
+		st.UnlockSession = s.unlockSession
 		st.UserSuperPub = append([]byte(nil), s.userSuperPub...)
 		st.ActiveMethodID = s.unlockMID
 	}
@@ -575,6 +578,7 @@ func (s *Server) handleUnlockContext(ctx context.Context, u *UnlockReq) *Respons
 	s.userSuperPub = append([]byte(nil), v.UserSuperPub...)
 	now := time.Now()
 	s.unlockedAt = now
+	s.unlockSession = rand.Text()
 	s.lastActivity = now
 	// SECURITY (codex audit 🟡 server.go:305): wipe any prior
 	// redactedBody before overwriting. The "redacted" body still
@@ -885,6 +889,7 @@ func (s *Server) lockHeld() {
 	s.unlockPP = nil
 	s.userSuperPub = nil
 	s.unlockedAt = time.Time{}
+	s.unlockSession = ""
 	s.lastActivity = time.Time{}
 }
 

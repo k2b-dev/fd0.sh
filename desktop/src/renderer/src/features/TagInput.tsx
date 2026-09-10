@@ -8,6 +8,8 @@ export function TagInput(props: {
   pending: string;
   options: TagOption[];
   disabled?: boolean;
+  caseSensitive?: boolean;
+  rejectCommas?: boolean;
   onChange(tags: string[]): void;
   onPending(text: string): void;
 }) {
@@ -15,13 +17,14 @@ export function TagInput(props: {
   let input: HTMLInputElement | undefined;
   const [open, setOpen] = createSignal(false);
   const [active, setActive] = createSignal(-1);
-  const suggestions = createMemo(() => suggestTags(props.options, props.value, props.pending));
+  const suggestions = createMemo(() => suggestTags(props.options, props.value, props.pending, props.caseSensitive));
   const error = createMemo(() => {
-    try { addTag(props.value, props.pending, props.options); return ""; }
+    try { addTag(props.value, props.pending, props.options, props.caseSensitive, props.rejectCommas); return ""; }
     catch (cause) { return cause instanceof Error ? cause.message : "Check this tag."; }
   });
-  const newTag = () => trimTag(props.pending) && !props.options.some((option) => tagKey(option.tag) === tagKey(trimTag(props.pending)))
-    && !props.value.some((tag) => tagKey(tag) === tagKey(trimTag(props.pending)));
+  const matchKey = (tag: string) => props.caseSensitive ? tag : tagKey(tag);
+  const newTag = () => trimTag(props.pending) && !props.options.some((option) => matchKey(option.tag) === matchKey(trimTag(props.pending)))
+    && !props.value.some((tag) => matchKey(tag) === matchKey(trimTag(props.pending)));
   const choices = createMemo(() => [...suggestions().map((option) => option.tag), ...(newTag() && !error() ? [trimTag(props.pending)] : [])]);
   createEffect(() => { props.options; props.pending; props.value; setActive(-1); });
   createEffect(() => { if (active() >= 0) document.getElementById(`${id}-option-${active()}`)?.scrollIntoView({ block: "nearest" }); });
@@ -29,7 +32,7 @@ export function TagInput(props: {
   function commit(text = props.pending): void {
     if (props.disabled) return;
     try {
-      props.onChange(addTag(props.value, text, props.options));
+      props.onChange(addTag(props.value, text, props.options, props.caseSensitive, props.rejectCommas));
       props.onPending("");
       setActive(-1);
     } catch { /* Keep invalid text visible with its field error. */ }
@@ -43,7 +46,7 @@ export function TagInput(props: {
           <span class="password-tag tag-edit-chip">
             {tag}
             <button type="button" disabled={props.disabled} aria-label={`Remove tag ${tag}`}
-              onClick={() => props.onChange(props.value.filter((value) => tagKey(value) !== tagKey(tag)))}>
+              onClick={() => props.onChange(props.value.filter((value) => matchKey(value) !== matchKey(tag)))}>
               <IconX size={12} />
             </button>
           </span>

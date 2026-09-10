@@ -1,7 +1,13 @@
 ---
 name: fd0
 description: >-
-  Use this skill whenever the user — or an agent acting on the user's behalf — needs to store, fetch, share, or organize secrets with the fd0 CLI (`fd0 init`, `fd0 secret set`, `fd0 secret get`, `fd0 sync`, `fd0 scope ...`, `fd0 card ...`), use fd0 as a password manager (`fd0 pass ...`), manage SSH keys, hosts, terminal sessions, or remote files (`fd0 key ...`, `fd0 ssh ...`, `fd0 sftp ...`), or manage Talos Linux / Kubernetes credentials (`fd0 talos ...`, `fd0 kube ...`). Trigger on any of these phrasings even when the user does not name fd0 explicitly — "store a deploy key", "save this API token", "fetch my DB password", "share a credential with bob", "add bob to the work scope", "rotate access", "set up my passphrase", "vault locked", "lock failed", "sync errored", "open my password manager", "store a login", "copy my GitHub password", "fill a login in Chrome", "add a TOTP code", "attach a recovery key file", "generate an ssh key", "share ssh access with the team", "connect to the prod box", "browse files on the prod box", "upload this release to the server", "download a remote log", "store the talosconfig", "share the kubeconfig", "bootstrap a talos cluster". Also trigger when an agent in the middle of another task needs to inject a credential into a script or deploy step — `fd0 secret get NAME` or `fd0 pass field get ITEM FIELD --raw` is the canonical retrieval path. Do NOT trigger for hosting or operating the fd0-server; that is a separate concern documented in this project's docs/HOSTING.md.
+  Store, retrieve, share, and organize credentials with the fd0 CLI. Use for
+  passwords, secrets, SSH keys and hosts, remote SFTP files, Kubernetes and
+  Talos credentials, scope membership, vault access, and credential injection
+  into authorized commands. Also use for cross-type tags, bulk cleanup,
+  resumable scope moves, and restricted metadata-only organization by an agent
+  that must not see secret values. Includes fd0 Desktop and CLI workflows.
+  Do not use for hosting or operating fd0-server; see docs/HOSTING.md instead.
 ---
 
 # fd0 — Zero-knowledge secrets CLI
@@ -9,6 +15,15 @@ description: >-
 fd0 stores credentials client-side under a passphrase (or YubiKey), syncs ciphertext-only to a server, and shares scope-by-scope with teammates via cryptographic membership. The server cannot decrypt anything. Every change is a signed event, every server tree-head is countersigned by an independent witness.
 
 Use this skill when the user wants to **manage their own secrets** with fd0. For the protocol model and trust guarantees, read `references/protocol.md`. For installing fd0 itself, read `references/install.md`.
+
+## Organizing without exposing values
+
+For cross-type tags, cleanup, batch changes, safe scope moves, or an agent that
+must not see secrets, read [references/organization.md](references/organization.md)
+first. Use `fd0 item list --json` for metadata and `fd0 organize serve` for
+restricted MCP access. The organizing model must receive only those tools;
+full shell/filesystem access defeats that boundary. User approval happens in a
+separate trusted client. Do not use credential retrieval commands for cleanup.
 
 ## Decision tree
 
@@ -35,6 +50,10 @@ Map the user's intent to the right command before typing anything:
 | Read or write an item's note | `fd0 pass notes NAME`; `fd0 pass notes set NAME [TEXT]`; `fd0 pass notes rm NAME` |
 | Attach a small key/recovery file | `fd0 pass file add NAME PATH [FIELD]` (32 KiB max per file) |
 | Export an attached file | `fd0 pass file export NAME FIELD --out PATH` |
+| List metadata across all item types | `fd0 item list --scope LABEL --json` |
+| Add or remove tags on any item | `fd0 item tags add ITEM_ID --scope LABEL --tag TEXT`; `fd0 item tags remove ITEM_ID --scope LABEL --tag TEXT` |
+| Preview a batch cleanup | `fd0 item batch --scope LABEL --id ID --operation add --tag TEXT --dry-run` |
+| Give an agent restricted organization tools | Read `references/organization.md`; configure `fd0 organize serve` in a tool-only host |
 | Organize related secrets | `fd0 scope create --label LABEL` |
 | See your scopes, or who is in one | `fd0 scope ls`; `fd0 scope members [SCOPE]` |
 | Rename a scope | `fd0 scope rename SCOPE NEW_LABEL` (label only; the scope id never changes) |
@@ -79,7 +98,7 @@ Map the user's intent to the right command before typing anything:
 | See an item's earlier versions | `fd0 <module> history NAME` (newest first) |
 | Undo a bad change | `fd0 <module> history restore NAME SEQ` |
 
-Every command except `fd0 sync` is local. `sync` is the only one that touches the network. The `pass`/`key`/`ssh`/`talos`/`kube` families all store their material as ordinary scope-shared secrets, so sharing a password item, SSH key, host alias, or talosconfig with a teammate is the same `scope add-member` flow.
+Organization tag/name edits are local. Moving items between scopes that have synchronized before also contacts the primary to verify the destination before archiving the source. Commands such as `sync`, updates and remote SSH/SFTP operations use the network. The `pass`/`key`/`ssh`/`talos`/`kube` families all store their material as ordinary scope-shared secrets, so sharing a password item, SSH key, host alias, or talosconfig with a teammate is the same `scope add-member` flow.
 
 `add` and `new` refuse an existing name by default. `--force` does not merge — it **replaces the record outright**, so every field the command did not pass goes back to its default. To change one field and leave the rest alone, use `<module> edit` instead. fd0 says so at both points: the duplicate error names the `edit` command, and a forced overwrite warns before it happens.
 
@@ -423,6 +442,7 @@ These are not negotiable. The skill is useless and dangerous without them.
 
 ## When to read the reference files
 
+- **`references/organization.md`** — Before cross-type tagging, bulk cleanup, scope moves or secret-free agent access. Covers permissions, review, drift, resume, compatibility and trusted credential transfer.
 - **`references/protocol.md`** — Before answering questions about what the server can/cannot see, why removing a member actually revokes access, how the transparency log works, or what "ciphertext-only contract" means. Also before discussing trust assumptions for self-hosting vs hosted.
 - **`references/install.md`** — When the user wants to install or update fd0 itself, or wants to install this skill in a different setup. Includes `bunx skills add` and manual paths.
 - **`references/sftp.md`** — Before browsing, uploading, downloading, renaming, or deleting files on an fd0 SSH host.

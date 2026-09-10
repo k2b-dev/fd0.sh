@@ -253,7 +253,7 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 				"deleted-items", "totp-parse",
 				"field-value", "pass-save", "secret-save", "ssh-host-save",
 				"ssh-key-list", "ssh-key-generate", "ssh-key-edit",
-				"config-import", "item-move", "item-rename", "item-remove", "scope-create",
+				"config-import", "item-tags", "item-move", "item-rename", "item-remove", "scope-create",
 				"scope-rename", "scope-leave", "scope-share", "scope-members", "identity-cards",
 				"recovery-export", "recovery-import", "auth-default", "agent-prepare-update",
 				"agent-restart", "structured-sync",
@@ -519,6 +519,20 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, err
 		}
 		return s.removeItem(ctx, params)
+	case "organization.inventory":
+		return s.organizationInventory(ctx)
+	case "organization.batch":
+		var params cli.OrganizationBatch
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.organizationBatch(ctx, params)
+	case "item.tags":
+		var params ItemTagsParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.setItemTags(ctx, params)
 	case "item.move":
 		var params MoveItemParams
 		if err := decodeParams(raw, &params); err != nil {
@@ -1481,6 +1495,10 @@ func (s *Service) saveSecret(ctx context.Context, params SaveSecretParams) (map[
 	if params.Name == "" {
 		return nil, fail("validation", "Secret name is required.", "", false)
 	}
+	if cli.ValidatePlainSecretName(params.Name) != nil {
+		return nil, fail("validation", "Use a plain secret name without a reserved prefix.", "", false)
+	}
+
 	session, err := cli.Open(ctx)
 	if err != nil {
 		return nil, mapDomainError(err)
@@ -1510,20 +1528,20 @@ func (s *Service) saveSecret(ctx context.Context, params SaveSecretParams) (map[
 			}
 		}
 	}
-	session.Close()
-	if err := cli.RunSecretSet(ctx, params.ScopeID, params.Name, params.Value); err != nil {
+	defer session.Close()
+	if params.OldName != "" && params.OldName != params.Name {
+		record, err := session.GetTypedSecret(params.ScopeID, params.OldName)
+		if err != nil {
+			return nil, mapDomainError(err)
+		}
+		if err := session.RenameOrganizationItem(ctx, record, params.Name); err != nil {
+			return nil, mapDomainError(err)
+		}
+	}
+	if err := session.SavePlainSecret(ctx, params.ScopeID, params.Name, params.Value, params.Create); err != nil {
 		return nil, mapDomainError(err)
 	}
-	if params.OldName != "" && params.OldName != params.Name {
-		cleanupSession, err := cli.Open(ctx)
-		if err != nil {
-			return nil, fail("rename_partial", "The secret was saved under its new name, but fd0 could not remove the old copy.", "Review both items before retrying.", false)
-		}
-		defer cleanupSession.Close()
-		if err := cleanupSession.RemoveTypedSecretOfType(ctx, params.ScopeID, params.OldName, "kv.string"); err != nil {
-			return nil, fail("rename_partial", "The secret was saved under its new name, but fd0 could not remove the old copy.", "Review both items before retrying.", false)
-		}
-	}
+
 	return map[string]bool{"ok": true}, nil
 }
 

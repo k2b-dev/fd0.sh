@@ -29,6 +29,9 @@ const (
 //
 // Caller must hold the session lock; the helper re-uses Session.Agent.
 func (s *Session) writeScopeMeta(scopeID string, fields map[string]string) error {
+	if err := s.checkOrganizationWrite(); err != nil {
+		return err
+	}
 	sd := s.Body.Scopes[scopeID]
 	if len(sd.OEKs) == 0 {
 		return fmt.Errorf("scope %s: no OEK in vault", scopeName(s, scopeID))
@@ -56,15 +59,12 @@ func (s *Session) writeScopeMeta(scopeID string, fields map[string]string) error
 	for k, v := range fields {
 		merged[k] = v
 	}
+	current := st.SecretIndex[MetaSecretID]
 	body := &proto.SecretBody{
-		ID: MetaSecretID,
-		Record: &proto.SecretRecord{
-			Name:          MetaSecretName,
-			Type:          MetaSecretType,
-			SchemaVersion: 1,
-			Payload:       merged,
-		},
+		ID:     MetaSecretID,
+		Record: preservedRecord(current.Record, MetaSecretName, MetaSecretType, merged),
 	}
+
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub, proto.MustParseScopeID(scopeID),
 		st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
 	if err != nil {

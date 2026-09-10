@@ -18,9 +18,9 @@ test("Go and Desktop share tag normalization and case matching", () => {
 
 test("suggestions stay inside the chosen vault and never replace fuzzy free text", () => {
   const item = (scopeId: string, tags: string[]): ItemSummary => ({ id: "id", scopeId, recordName: "Login", title: "Login", kind: "password", vault: scopeId, badge: "PASSWORD", tags });
-  const items = [item("work", ["Work", "Team A"]), item("work", ["work"]), item("private", ["Private"]), { ...item("work", ["Not a password"]), kind: "ssh" as const }];
+  const items = [item("work", ["Work", "Team A"]), item("work", ["work"]), item("private", ["Private"]), { ...item("work", ["Infrastructure"]), kind: "ssh" as const }];
   const options = tagCatalog(items, "work");
-  expect(options).toEqual([{ tag: "Team A", count: 1 }, { tag: "Work", count: 2 }]);
+  expect(options).toEqual([{ tag: "Infrastructure", count: 1 }, { tag: "Team A", count: 1 }, { tag: "Work", count: 2 }]);
   expect(suggestTags(options, [], "wo").map((option) => option.tag)).toEqual(["Work"]);
   expect(addTag([], "wo", options)).toEqual(["wo"]);
   expect(addTag([], "work", options)).toEqual(["Work"]);
@@ -29,4 +29,15 @@ test("suggestions stay inside the chosen vault and never replace fuzzy free text
   expect(matchesItemTags(items[1]!, ["Work", "Team A"], false)).toBe(false);
   expect(matchesItemTags(items[0]!, [], true)).toBe(false);
   expect(matchesItemTags(item("work", []), [], true)).toBe(true);
+});
+
+
+test("native infrastructure casing stays selectable beside folded password tags", () => {
+ const base: ItemSummary = {id:"host",scopeId:"work",recordName:"host:web",title:"web",kind:"ssh",vault:"work",badge:"SSH HOST",tags:["prod","Prod"]};
+ const password: ItemSummary = {...base,id:"pass",recordName:"pass:login",kind:"password",badge:"PASSWORD",tags:["PROD"]};
+ const catalog = tagCatalog([base,password]);
+ expect(catalog.map(option => option.tag).sort()).toEqual(["Prod","prod"]);
+ expect(catalog.every(option => option.count === 2)).toBe(true);
+ expect(matchesItemTags(base,["PROD"],false)).toBe(false);
+ expect(matchesItemTags(password,["prod"],false)).toBe(true);
 });

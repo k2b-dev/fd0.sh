@@ -102,6 +102,8 @@ func (k ItemKind) record(s *Session, scopeID, name string) (*TypedRecord, error)
 // a stored record name directly, so the check lives here.
 func validItemName(name string) error {
 	switch {
+	case name == MetaSecretName:
+		return errors.New("reserved metadata name")
 	case strings.TrimSpace(name) == "":
 		return errors.New("name cannot be empty")
 	case name != strings.TrimSpace(name):
@@ -127,37 +129,17 @@ func (s *Session) MoveItem(
 	if err := guardOwnedName(kind, "move", name); err != nil {
 		return err
 	}
-	r, err := kind.record(s, fromScope, name)
-	if err != nil {
+	if fromScope == "" {
+		record, err := kind.record(s, fromScope, name)
+		if err != nil {
+			return err
+		}
+		fromScope = record.ScopeID
+	}
+	if err := s.MoveOrganizationItems(ctx, []OrganizationMove{{ScopeID: fromScope, Name: kind.Prefix + name, TargetScopeID: toScope, Replace: force}}); err != nil {
 		return err
 	}
-	dest, err := s.resolveScopeID(toScope)
-	if err != nil {
-		return err
-	}
-	if r.ScopeID == dest {
-		return fmt.Errorf("source and destination scopes are the same: %s", scopeName(s, dest))
-	}
-	if err := ensureNoDuplicate(s, dest, kind.Prefix, name, force); err != nil {
-		return err
-	}
-	payload, err := r.PayloadJSON()
-	if err != nil {
-		return err
-	}
-	if err := s.writeTypedSecretPayload(ctx, dest, r.Name, r.Type, string(payload), false, ""); err != nil {
-		return err
-	}
-	if err := s.RemoveTypedSecret(ctx, r.ScopeID, r.Name); err != nil {
-		// The item now exists in both scopes. Naming the exact clean-up
-		// command matters: re-running the move hits the duplicate check and
-		// refuses, so "try again" would be wrong advice.
-		return fmt.Errorf("moved %s %q to %s but failed to remove it from %s: %w (clean up with: fd0 %s rm %s --scope %s)",
-			kind.Noun, name, scopeName(s, dest), scopeName(s, r.ScopeID), err,
-			kind.Command, name, scopeName(s, r.ScopeID))
-	}
-	stderrln("✓ moved %s %q: %s → %s", kind.Noun, name, scopeName(s, r.ScopeID), scopeName(s, dest))
-	hooksFor(kind).after(s)
+	stderrln("✓ moved %s %q to %s", kind.Noun, name, toScope)
 	hintSyncForPeers()
 	return nil
 }
@@ -199,7 +181,10 @@ func (s *Session) RenameItem(
 			return err
 		}
 	}
-	if err := s.writeTypedSecretPayload(ctx, r.ScopeID, kind.Prefix+newName, r.Type, string(payload), false, ""); err != nil {
+	if err := s.writeTypedSecretPayload(ctx, r.ScopeID, kind.Prefix+newName, r.Type, string(payload), false, "", r.metadata()); err != nil {
+		return err
+	}
+	if err := s.copyOrganizationTags(r, r.ScopeID, kind.Prefix+newName); err != nil {
 		return err
 	}
 	if err := s.RemoveTypedSecret(ctx, r.ScopeID, r.Name); err != nil {
@@ -425,7 +410,13 @@ func kindOwning(name string) (ItemKind, bool) {
 // guardPlainSecret refuses a name that belongs to another module and points at
 // the command that does own it. Modules stay reachable — just not by pretending
 // their records are plain secrets.
+// ValidatePlainSecretName rejects reserved scope metadata and typed-item namespaces.
+func ValidatePlainSecretName(name string) error { return guardPlainSecret("set", name) }
+
 func guardPlainSecret(verb, name string) error {
+	if name == MetaSecretName {
+		return errors.New("reserved scope metadata is not a plain secret")
+	}
 	kind, owned := kindOwning(name)
 	if !owned {
 		return nil

@@ -66,7 +66,7 @@ import type {
   LargeTypeValue,
   LargeTypeWindowResult,
   MoveItemInput,
-  RecordRef,
+  OrganizationBatch, RecordRef,
   RenameItemInput,
   ResolvedDesktopTheme,
   SavePassInput,
@@ -1487,6 +1487,9 @@ function registerIPC(client: BridgeSupervisor): void {
     const input = await client.request<SavePassInput>("pass.editData", ref);
     return { ...input, authorization };
   });
+  handle("fd0:organization-inventory", () => client.request("organization.inventory", {}));
+  handle("fd0:organization-batch", (request: OrganizationBatch) => client.request("organization.batch", request));
+  handle("fd0:set-item-tags", (ref: RecordRef, tags: string[], expectedTags?: string[]) => client.request("item.tags", { ...ref, tags, expectedTags }));
   handle("fd0:set-favorite", (ref: RecordRef, favorite: boolean) => client.request("pass.favorite", { ...ref, favorite: Boolean(favorite) }));
   handle("fd0:pick-attachment", async () => {
     if (!mainWindow) throw new Error("fd0 window is unavailable");

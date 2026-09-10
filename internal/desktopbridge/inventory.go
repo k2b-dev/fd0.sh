@@ -273,6 +273,7 @@ func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary,
 		Subtitle:   "General secret",
 		Vault:      vault,
 		Badge:      "SECRET",
+		Tags:       record.OrganizationTags,
 	}
 	switch record.Type {
 	case passitem.TypePassItem:
@@ -311,6 +312,7 @@ func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary,
 			summary.Subtitle = host.User + "@" + host.Hostname
 		}
 		summary.Badge = "SSH HOST"
+		summary.Tags = host.Tags
 		summary.SearchText = strings.Join([]string{
 			host.Alias, host.Hostname, host.User, host.KeyName, host.ProxyJump,
 			strings.Join(host.Tags, " "),
@@ -339,6 +341,7 @@ func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary,
 		summary.Title = entry.Name
 		summary.Subtitle = entry.Server
 		summary.Badge = "KUBE"
+		summary.Tags = entry.Tags
 		summary.SearchText = strings.Join([]string{entry.Name, entry.Server, entry.Namespace}, " ")
 	case talosctx.TypeTalosContext:
 		entry, err := talosctx.Unmarshal(raw)
@@ -349,6 +352,7 @@ func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary,
 		summary.Title = entry.Name
 		summary.Subtitle = strings.Join(entry.Endpoints, ", ")
 		summary.Badge = "TALOS"
+		summary.Tags = entry.Tags
 		summary.SearchText = strings.Join([]string{
 			entry.Name, strings.Join(entry.Endpoints, " "), strings.Join(entry.Nodes, " "), entry.Role,
 		}, " ")

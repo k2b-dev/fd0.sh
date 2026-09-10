@@ -27,6 +27,8 @@ var version = "dev"
 var distribution = "standalone"
 
 type rootCLI struct {
+	Organize organizeCmd `cmd:"" help:"Grant a restricted agent metadata-only organization access and review its plans."`
+	Item     itemCmd     `cmd:"" help:"Organize all item types without printing secret values."`
 	Init     initCmd     `cmd:"" help:"Create a new identity and vault."`
 	Unlock   unlockCmd   `cmd:"" help:"Start the agent and unlock the vault."`
 	Lock     lockCmd     `cmd:"" help:"Lock the vault in the running agent."`
@@ -961,6 +963,9 @@ func maybeAutoUnlock(kctx *kong.Context, c *rootCLI) error {
 }
 
 func commandNeedsUnlockedVault(command string) bool {
+	if strings.HasPrefix(command, "item ") {
+		return true
+	}
 	// The `secret ` forms and the hidden legacy spellings are the same
 	// commands, so fold them together before asking rather than listing each
 	// verb twice and risking one half going stale.
@@ -1109,6 +1114,12 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		// Reduced to its legacy spelling: read the flags kong actually filled.
 		c.Get, c.Copy, c.Set, c.Rm, c.List =
 			c.Secret.Get, c.Secret.Copy, c.Secret.Set, c.Secret.Rm, c.Secret.List
+	}
+	if strings.HasPrefix(command, "organize ") {
+		return runOrganize(ctx, command, c.Organize)
+	}
+	if strings.HasPrefix(command, "item ") {
+		return runItem(ctx, command, c.Item)
 	}
 	switch command {
 	case "init":

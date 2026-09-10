@@ -83,10 +83,10 @@ Set `FD0_DESKTOP_FLAVOR=standard` to build without YubiKey support. Desktop buil
 
 ## Verify
 
-For focused password-tag and reveal checks without Electron or an fd0 agent:
+For focused cross-type tag, organization, navigation and reveal checks without Electron or an fd0 agent:
 
 ```sh
-bun test tests/tags.test.ts tests/password-tags.test.ts tests/item-reveal.test.ts
+bun test tests/tags.test.ts tests/password-tags.test.ts tests/item-navigation.test.ts tests/item-reveal.test.ts --timeout 30000
 ```
 
 These component tests use Chromium with synthetic inventory and a mocked bridge. They require Playwright's Chromium browser to be installed. Set `FD0_TAGS_SCREENSHOTS` to a temporary output directory to capture the narrow tag editor in both themes.

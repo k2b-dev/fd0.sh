@@ -118,6 +118,7 @@ function App(): JSX.Element {
           if (!input) return;
           setDraft({
             ...emptyDraft("secret", input.scopeId),
+            tags: [...(item.tags ?? [])],
             recordName: input.oldName ?? input.name,
             authorization: input.authorization,
             title: input.name,
@@ -134,6 +135,7 @@ function App(): JSX.Element {
           if (!input) return;
           setDraft({
             ...emptyDraft("ssh", input.scopeId),
+            tags: [...(item.tags ?? [])],
             recordName: input.oldName ?? `host:${input.host.Alias}`,
             authorization: input.authorization,
             title: input.host.Alias,
@@ -157,6 +159,7 @@ function App(): JSX.Element {
           if (!input) return;
           setDraft({
             ...emptyDraft("ssh-key", input.scopeId),
+            tags: [...(item.tags ?? [])],
             recordName: `ssh:${input.name}`,
             authorization: input.authorization,
             title: input.name,
@@ -213,7 +216,8 @@ function App(): JSX.Element {
       void window.fd0.editSecret(ref)
         .then((input) => {
           if (!input) return;
-          setDraft({ ...emptyDraft("secret", input.scopeId), title, value: input.value });
+          setDraft({ ...emptyDraft("secret", input.scopeId),
+            tags: [...(item.tags ?? [])], title, value: input.value });
         })
         .catch(failed);
       return;
@@ -224,6 +228,7 @@ function App(): JSX.Element {
           if (!input) return;
           setDraft({
             ...emptyDraft("ssh", input.scopeId),
+            tags: [...(item.tags ?? [])],
             title,
             host: {
               hostname: input.host.Hostname,

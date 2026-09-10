@@ -15,8 +15,13 @@ const inventory: Inventory = {
 };
 let saved: SavePassInput | null = null;
 let failSave = false;
+let failTags = false;
+let secretWrites = 0;
+let savedTags: string[] = [];
 Object.defineProperty(window, "fd0", { value: {
   development: true,
+  saveSecret: async () => { secretWrites++; return { ok:true }; },
+  setItemTags: async (_ref: unknown, tags: string[]) => { if (failTags) throw new Error("Synthetic tags failure"); savedTags = [...tags]; return { ok:true }; },
   status: async () => ({ unlocked: true }),
   inventory: async () => structuredClone(inventory),
   itemDetail: async (ref: { name: string }) => ({ item: inventory.items.find((item) => item.recordName === ref.name), fields: [] }),
@@ -45,6 +50,9 @@ function openEditor(create = false) {
 const tagsTest = {
   ready: () => vault.refresh(), openEditor,
   saved: () => saved,
+  openSecret: () => setDraft({ ...emptyDraft("secret", "work"), title:"Token", value:"synthetic-only" }),
+  failTags: (value: boolean) => { failTags = value; },
+  secretState: () => ({ writes:secretWrites, tags:savedTags }),
   fail(value: boolean) { failSave = value; },
   filters: () => vault.filters(),
   filter: vault.updateFilters,

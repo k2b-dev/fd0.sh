@@ -5,7 +5,7 @@ import { DetailNavigation } from "../../src/renderer/src/features/DetailNavigati
 import { CommandPalette } from "../../src/renderer/src/features/CommandPalette";
 import { ItemDetail } from "../../src/renderer/src/features/ItemDetail";
 import { createVaultStore, VaultContext } from "../../src/renderer/src/lib/store";
-import type { Inventory, ItemSummary } from "../../src/shared/contracts";
+import type { Inventory, ItemSummary, OrganizationBatch, OrganizationItem } from "../../src/shared/contracts";
 import "../../src/renderer/src/styles.css";
 
 const item = (id: string, scopeId: string, tags: string[]): ItemSummary => ({ id, scopeId, recordName: `pass:${id}`, title: id, kind: "password", vault: scopeId, badge: "PASSWORD", tags });
@@ -19,9 +19,19 @@ const inventory: Inventory = {
   ],
   counts: { password: 1, secret: 1, ssh: 2 },
 };
+const batchCalls: OrganizationBatch[] = [];
+const organizationItems = (): OrganizationItem[] => inventory.items.map(item => ({ id:item.id, scopeId:item.scopeId, scope:item.vault, name:item.recordName, title:item.title, kind:item.badge === "SSH HOST" ? "ssh" : item.badge === "SSH KEY" ? "key" : item.kind === "password" ? "pass" : item.kind, tags:item.tags ?? [], revision:"fixture:1" }));
 Object.defineProperty(window, "fd0", { value: {
   development: true,
+  organizationInventory: async () => organizationItems(),
+  organizeItems: async (request: OrganizationBatch) => {
+   batchCalls.push(structuredClone(request));
+   const result = request.items.map(item => ({ ...item, tags:request.operation === "add" ? [...(item.tags ?? []), ...(request.tags ?? [])] : request.tags ?? [] }));
+   if (!request.dryRun) for (const item of result) { const target = inventory.items.find(candidate => candidate.id === item.id); if (target) target.tags = item.tags; }
+   return { items:result, completed:request.dryRun ? [] : result.map(item => item.id), dryRun:request.dryRun };
+  },
   lock: async () => {},
+  setItemTags: async (ref: { name: string }, tags: string[]) => { const item = inventory.items.find((item) => item.recordName === ref.name); if (!item) throw new Error("Missing fixture item"); item.tags = tags; return { ok: true }; },
   status: async () => ({ unlocked: true }),
   inventory: async () => structuredClone(inventory),
   itemDetail: async (ref: { name: string }) => ({ item: inventory.items.find((item) => item.recordName === ref.name), fields: ref.name === "pass:Host" ? [{ path: "key", name: "key", type: "text", value: "deploy" }] : [] }),
@@ -45,6 +55,7 @@ render(() => {
 }, document.body);
 
 const navigationTest = {
+  batches: () => batchCalls,
   ready: () => vault.refresh(), palette: () => setPalette(true), filter: vault.updateFilters,
   query: vault.setQuery, raw: vault.setRawSecrets, back: vault.goBack, lock: vault.lock,
   jump: (id: string) => vault.jumpToItem(inventory.items.find((item) => item.id === id)!),

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -34,10 +35,15 @@ var ErrTypedSecretNotFound = errors.New("typed secret not found")
 // via json.Unmarshal into the type-specific shape (sshkey.JSON,
 // sshhost.JSON, …).
 type TypedRecord struct {
-	ScopeID string
-	Name    string
-	Type    string
-	Payload any
+	ID               string
+	SchemaVersion    uint64
+	RecordTags       map[string]string
+	OrganizationTags []string
+	Revision         string
+	ScopeID          string
+	Name             string
+	Type             string
+	Payload          any
 }
 
 // SetTypedSecret writes a structured secret in the given scope. The
@@ -91,7 +97,11 @@ func (s *Session) writeTypedSecretPayload(
 	payload any,
 	requireMissing bool,
 	expectedType string,
+	metadata ...*proto.SecretRecord,
 ) error {
+	if err := s.checkOrganizationWrite(); err != nil {
+		return err
+	}
 	scopeID, err := s.resolveScopeID(scopeID)
 	if err != nil {
 		return err
@@ -141,15 +151,14 @@ func (s *Session) writeTypedSecretPayload(
 	if sid == "" {
 		sid = "s_" + ulid.Make().String()
 	}
+	base := current
+	if len(metadata) > 0 {
+		base = metadata[0]
+	}
+	record := preservedRecord(base, name, secretType, payload)
 	body := &proto.SecretBody{
-		ID: sid,
-		Record: &proto.SecretRecord{
-			Name:          name,
-			Type:          secretType,
-			SchemaVersion: 1,
-			Payload:       payload,
-			Tags:          map[string]string{},
-		},
+		ID:     sid,
+		Record: record,
 	}
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
@@ -213,7 +222,12 @@ func (s *Session) ListTypedSecrets(scopeID, secretType string) ([]TypedRecord, e
 			if secretType != "" && cur.Record.Type != secretType {
 				continue
 			}
+			tags, err := organizationTagsFromIndex(st.SecretIndex, id)
+			if err != nil {
+				return nil, err
+			}
 			out = append(out, TypedRecord{
+				ID: id, SchemaVersion: cur.Record.SchemaVersion, RecordTags: maps.Clone(cur.Record.Tags), OrganizationTags: tags, Revision: cur.EventID,
 				ScopeID: sc,
 				Name:    cur.Record.Name,
 				Type:    cur.Record.Type,
@@ -276,6 +290,9 @@ func (s *Session) RemoveTypedSecretOfType(ctx context.Context, scopeID, name, ex
 }
 
 func (s *Session) removeTypedSecret(ctx context.Context, scopeID, name, expectedType string) error {
+	if err := s.checkOrganizationWrite(); err != nil {
+		return err
+	}
 	scopeID, err := s.resolveScopeID(scopeID)
 	if err != nil {
 		return err
@@ -355,4 +372,18 @@ func payloadJSON(payload any) ([]byte, error) {
 // stderrln is a tiny helper for consistent line-ended status output.
 func stderrln(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
+
+// Ordinary writes preserve fields owned by other features or newer writers.
+func preservedRecord(base *proto.SecretRecord, name, kind string, payload any) *proto.SecretRecord {
+	r := &proto.SecretRecord{Name: name, Type: kind, SchemaVersion: 1, Payload: payload, Tags: map[string]string{}}
+	if base != nil {
+		r.SchemaVersion = base.SchemaVersion
+		r.Tags = maps.Clone(base.Tags)
+	}
+	return r
+}
+
+func (r TypedRecord) metadata() *proto.SecretRecord {
+	return &proto.SecretRecord{SchemaVersion: r.SchemaVersion, Tags: r.RecordTags}
 }

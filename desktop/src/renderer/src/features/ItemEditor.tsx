@@ -113,12 +113,14 @@ export function ItemEditor(props: {
   const [host, setHost] = createSignal({ ...props.draft.host });
   const [comment, setComment] = createSignal(props.draft.comment);
   const [keyPickerOpen, setKeyPickerOpen] = createSignal(false);
+  const [savedRefs, setSavedRefs] = createSignal<RecordRef[]>([]);
   const [busy, setBusy] = createSignal(false);
   const [invalid, setInvalid] = createSignal<Set<string>>(new Set());
 
   const meta = createMemo(() => itemKinds.find((option) => option.id === props.draft.kind)!);
   const imports = () => props.draft.kind === "kubernetes" || props.draft.kind === "talos";
   const isPassword = () => props.draft.kind === "password";
+  const tagCaseSensitive = () => ["ssh", "kubernetes", "talos"].includes(props.draft.kind);
 
   const original = JSON.stringify({
     tags: props.draft.tags,
@@ -137,9 +139,7 @@ export function ItemEditor(props: {
 
   const canSave = createMemo(() => {
     if (!scopeID()) return false;
-    if (isPassword()) {
-      try { addTag(tags(), pendingTag(), tagOptions()); } catch { return false; }
-    }
+    try { addTag(tags(), pendingTag(), tagOptions(), tagCaseSensitive(), props.draft.kind === "ssh"); } catch { return false; }
     if (imports()) return true;
     if (!title().trim()) return false;
     if (invalid().size > 0) return false;
@@ -201,6 +201,7 @@ export function ItemEditor(props: {
           authorization: props.draft.authorization,
           host: {
             Alias: name,
+            Tags: addTag(tags(), pendingTag(), tagOptions(), true),
             Hostname: current.hostname.trim(),
             User: current.user.trim(),
             Port: current.port,
@@ -238,7 +239,8 @@ export function ItemEditor(props: {
         vault.notify(
           imported.imported.length === 1 ? `Imported ${imported.imported[0]}` : `Imported ${imported.imported.length} entries`,
         );
-        return { scopeId: scope, name: `${kind === "kubernetes" ? "kube" : "talos"}:${imported.imported[0]}` };
+        setSavedRefs(imported.imported.map(name => ({ scopeId: scope, name: `${kind === "kubernetes" ? "kube" : "talos"}:${name}` })));
+        return savedRefs()[0];
       }
     }
   }
@@ -248,7 +250,12 @@ export function ItemEditor(props: {
     if (!canSave()) return;
     setBusy(true);
     try {
-      const saved = await persist();
+      const nextTags = addTag(tags(), pendingTag(), tagOptions(), tagCaseSensitive(), props.draft.kind === "ssh");
+      const saved = savedRefs()[0] ?? await persist();
+      if (saved && !savedRefs().length) setSavedRefs([saved]);
+      if (saved && !isPassword() && (isCreate() || JSON.stringify(nextTags) !== JSON.stringify(props.draft.tags))) {
+        for (const ref of savedRefs()) await window.fd0.setItemTags(ref, nextTags);
+      }
       if (saved || !imports()) await props.onSaved(saved);
     } catch (cause) {
       vault.pushError(toAppError(cause, `fd0 could not save ${title().trim() || "this item"}`));
@@ -258,6 +265,7 @@ export function ItemEditor(props: {
   }
 
   const saveLabel = () => {
+    if (savedRefs().length && !busy()) return "Retry saving tags";
     if (busy()) return imports() ? "Importing…" : "Saving…";
     if (imports()) return "Choose file…";
     return isCreate() ? "Create item" : "Save changes";
@@ -292,7 +300,9 @@ export function ItemEditor(props: {
         </div>
       }
     >
+      <Show when={savedRefs().length}><p role="status">Item content is saved. Retry to finish saving tags, or close and edit tags later.</p></Show>
       <form id="item-editor-form" class="field-stack item-editor-form" onSubmit={save}>
+      <fieldset class="item-editor-fields" disabled={busy() || savedRefs().length > 0}>
         <Show when={!imports()}>
           <div classList={{ "form-grid": true, "is-single": true }}>
             <Field
@@ -320,8 +330,8 @@ export function ItemEditor(props: {
           </div>
         </Show>
 
+        <TagInput value={tags()} pending={pendingTag()} options={tagOptions()} caseSensitive={tagCaseSensitive()} rejectCommas={props.draft.kind === "ssh"} disabled={busy() || savedRefs().length > 0} onChange={setTags} onPending={setPendingTag} />
         <Show when={isPassword()}>
-          <TagInput value={tags()} pending={pendingTag()} options={tagOptions()} disabled={busy()} onChange={setTags} onPending={setPendingTag} />
           <PasswordCards
             fields={fields()}
             urls={urls()}
@@ -457,6 +467,7 @@ export function ItemEditor(props: {
             This item has reached the {MAX_FIELDS} field limit.
           </p>
         </Show>
+      </fieldset>
       </form>
 
       <Show when={keyPickerOpen()}>

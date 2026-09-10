@@ -23,13 +23,14 @@ import (
 // Close. Open holds the ~/.fd0/.lock flock, talks to the agent for an unlock
 // (the agent must already be running), and replays chains.
 type Session struct {
-	Paths         fdhome.Paths
-	Lock          *flock.Flock
-	Agent         *agent.Client
-	UserSuperPub  []byte
-	UserX25519Pub []byte           // ed25519 → curve25519, derived once at Open
-	Body          *proto.VaultBody // body.SuperPriv is zeroed (held in agent)
-	UserState     *chain.UserState
+	organizationCheck func() error
+	Paths             fdhome.Paths
+	Lock              *flock.Flock
+	Agent             *agent.Client
+	UserSuperPub      []byte
+	UserX25519Pub     []byte           // ed25519 → curve25519, derived once at Open
+	Body              *proto.VaultBody // body.SuperPriv is zeroed (held in agent)
+	UserState         *chain.UserState
 
 	// ctx is the context Open was called with. Kept so the lazy
 	// legacy-history migration (scope_migrate.go) inherits the caller's
@@ -239,4 +240,11 @@ func acquireLock(ctx context.Context, lk *flock.Flock, configWait string) error 
 func VaultExists(p fdhome.Paths) bool {
 	_, err := os.Stat(p.Vault)
 	return err == nil
+}
+
+func (s *Session) checkOrganizationWrite() error {
+	if s.organizationCheck != nil {
+		return s.organizationCheck()
+	}
+	return nil
 }

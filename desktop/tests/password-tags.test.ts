@@ -137,3 +137,16 @@ test("tag editor wraps in narrow light and dark windows", () => withPage(async (
     if (process.env.FD0_TAGS_SCREENSHOTS) await page.screenshot({ path: `${process.env.FD0_TAGS_SCREENSHOTS}/password-tags-${theme}.png` });
   }
 }));
+
+
+test("new secret saves tags and retries a tag failure without duplicating content", () => withPage(async page => {
+ await page.evaluate(() => { window.tagsTest.failTags(true); window.tagsTest.openSecret(); });
+ const input = page.getByRole("combobox", { name:/Tags/ });
+ await input.fill("Operations"); await input.press("Enter");
+ await page.getByRole("button", { name:"Create item", exact:true }).click();
+ await page.getByRole("button", { name:"Retry saving tags", exact:true }).waitFor();
+ expect(await page.evaluate(() => window.tagsTest.secretState().writes)).toBe(1);
+ await page.evaluate(() => window.tagsTest.failTags(false));
+ await page.getByRole("button", { name:"Retry saving tags", exact:true }).click();
+ expect(await page.evaluate(() => window.tagsTest.secretState())).toEqual({writes:1,tags:["Operations"]});
+}));

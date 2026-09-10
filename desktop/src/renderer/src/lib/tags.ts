@@ -1,5 +1,7 @@
 import type { ItemSummary } from "../../../shared/contracts";
 
+export function caseSensitiveTags(item: ItemSummary): boolean { return ["SSH HOST", "KUBE", "TALOS"].includes(item.badge); }
+
 export const MAX_TAGS = 32;
 export const MAX_TAG_CHARACTERS = 64;
 
@@ -39,36 +41,54 @@ export function readTags(meta: unknown): string[] {
 export type TagOption = { tag: string; count: number };
 
 export function tagCatalog(items: ItemSummary[], scopeID = ""): TagOption[] {
-  const options = new Map<string, TagOption>();
+  const folded = new Map<string, TagOption>();
+  const exact = new Map<string, TagOption>();
   for (const item of items) {
-    if (item.kind !== "password" || (scopeID && item.scopeId !== scopeID)) continue;
-    for (const tag of readTags({ tags: item.tags })) {
-      const key = tagKey(tag);
+    if (scopeID && item.scopeId !== scopeID) continue;
+    const sensitive = caseSensitiveTags(item);
+    const tags = sensitive ? [...new Set((item.tags ?? []).flatMap(tag => readTags({ tags: [tag] })))] : readTags({ tags: item.tags });
+    for (const tag of tags) {
+      const options = sensitive ? exact : folded;
+      const key = sensitive ? tag : tagKey(tag);
       const current = options.get(key);
       options.set(key, { tag: current && current.tag < tag ? current.tag : tag, count: (current?.count ?? 0) + 1 });
     }
   }
-  return [...options.values()].sort((a, b) => tagKey(a.tag).localeCompare(tagKey(b.tag)));
+  // Each infrastructure spelling is a distinct selectable filter. Ordinary
+  // items match every spelling, so include them in each matching count.
+  const options = [...exact.values()].map(option => ({ ...option, count: option.count + (folded.get(tagKey(option.tag))?.count ?? 0) }));
+  for (const option of folded.values()) {
+    if (!options.some(candidate => tagKey(candidate.tag) === tagKey(option.tag))) options.push(option);
+  }
+  return options.sort((a, b) => tagKey(a.tag).localeCompare(tagKey(b.tag)) || a.tag.localeCompare(b.tag));
 }
 
-export function suggestTags(options: TagOption[], selected: string[], query: string): TagOption[] {
+export function suggestTags(options: TagOption[], selected: string[], query: string, caseSensitive = false): TagOption[] {
   const key = tagKey(trimTag(query));
-  const used = new Set(selected.map(tagKey));
-  return options.filter((option) => !used.has(tagKey(option.tag)) && tagKey(option.tag).includes(key))
+  const matchKey = caseSensitive ? (tag: string) => tag : tagKey;
+  const used = new Set(selected.map(matchKey));
+  return options.filter((option) => !used.has(matchKey(option.tag)) && tagKey(option.tag).includes(key))
     .sort((a, b) => Number(tagKey(b.tag).startsWith(key)) - Number(tagKey(a.tag).startsWith(key)))
     .slice(0, 8);
 }
 
-export function addTag(selected: string[], text: string, options: TagOption[]): string[] {
+export function addTag(selected: string[], text: string, options: TagOption[], caseSensitive = false, rejectCommas = caseSensitive): string[] {
   const tag = trimTag(text);
   if (!tag) return selected;
+  if (caseSensitive) {
+    if (rejectCommas && tag.includes(",")) throw new Error("Host tags cannot contain commas.");
+    normalizeTags([tag]);
+    const result = selected.includes(tag) ? [...selected] : [...selected, tag];
+    if (result.length > MAX_TAGS) throw new Error(`An item can have at most ${MAX_TAGS} tags.`);
+    return result;
+  }
   const existing = options.find((option) => tagKey(option.tag) === tagKey(tag));
   return normalizeTags([...selected, existing?.tag ?? tag]);
 }
 
 export function matchesItemTags(item: ItemSummary, tags: string[], untagged: boolean): boolean {
   if (!untagged && tags.length === 0) return true;
-  if (item.kind !== "password") return false;
-  const current = new Set((item.tags ?? []).map(tagKey));
-  return untagged ? current.size === 0 : tags.every((tag) => current.has(tagKey(tag)));
+  const key = caseSensitiveTags(item) ? (tag: string) => tag : tagKey;
+  const current = new Set((item.tags ?? []).map(key));
+  return untagged ? current.size === 0 : tags.every((tag) => current.has(key(tag)));
 }

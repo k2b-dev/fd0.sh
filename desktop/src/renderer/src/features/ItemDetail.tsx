@@ -22,7 +22,8 @@ import type { FieldView, ItemDetail as ItemDetailData, ItemSummary } from "../..
 import { editability, kindIcon, kindMeta, kindTone, vaultTone } from "../lib/items";
 import { absoluteDate, flattenFieldViews, formatBytes, initials, prettyURL, relativeDate } from "../lib/format";
 import { useVault } from "../lib/store";
-import { IconButton } from "../ui/Button";
+import { ItemTagEditor } from "./ItemTagEditor";
+import { Button, IconButton } from "../ui/Button";
 import { MenuButton, type MenuSection } from "../ui/Menu";
 import { ItemHistory } from "./ItemHistory";
 
@@ -114,6 +115,8 @@ function DetailContent(props: {
   const websiteField = createMemo(() => allFields().find((field) => field.type === "url" && field.value));
   const edit = createMemo(() => editability(item().kind, item().badge, props.raw));
   const usages = createMemo(() => props.detail.relations?.filter((relation) => relation.kind === "used-by") ?? []);
+
+  const [editingTags, setEditingTags] = createSignal(false);
 
   function linkedSSHKey(field: FieldView): ItemSummary | undefined {
     if (item().badge !== "SSH HOST" || field.path !== "key" || !field.value) return undefined;
@@ -351,11 +354,13 @@ function DetailContent(props: {
         <div class="detail-title">
           <h1>{item().title}</h1>
           <p>{props.raw ? "Raw stored record" : item().subtitle || kindMeta[item().kind].singular}</p>
-          <Show when={item().kind === "password" && !props.raw}>
+          <Show when={!props.raw}>
             <div class="detail-tags">
+              <Button size="sm" variant="quiet" onClick={() => setEditingTags(true)}>Edit tags</Button>
+              <Show when={editingTags()}><ItemTagEditor item={item()} onClose={() => setEditingTags(false)} /></Show>
               <For each={item().tags}>{(tag) => (
                 <button type="button" class="password-tag" aria-label={`Filter by tag ${tag}`}
-                  onClick={() => vault.updateFilters({ type: "password", tags: [tag], untagged: false })}>{tag}</button>
+                  onClick={() => vault.updateFilters({ type: item().kind, tags: [tag], untagged: false })}>{tag}</button>
               )}</For>
             </div>
           </Show>

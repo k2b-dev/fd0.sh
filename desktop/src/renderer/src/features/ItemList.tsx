@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { IconCopy, IconKey, IconPlus, IconSearch, IconShieldCheck, IconStar, IconUser, IconX } from "@tabler/icons-solidjs";
 import type { ItemSummary } from "../../../shared/contracts";
@@ -7,8 +7,9 @@ import { initials, plural, prettyURL } from "../lib/format";
 import { useVault } from "../lib/store";
 import { Button, IconButton } from "../ui/Button";
 import { Switch } from "../ui/Fields";
+import { OrganizeItems } from "./OrganizeItems";
 import { TagFilter } from "./TagFilter";
-import { tagKey } from "../lib/tags";
+
 
 /**
  * The item column.
@@ -24,6 +25,7 @@ export function ItemList(props: {
   onCreate(): void;
 }): JSX.Element {
   const vault = useVault();
+  const [organizing, setOrganizing] = createSignal(false);
   let listElement: HTMLDivElement | undefined;
 
   const heading = createMemo(() => {
@@ -47,7 +49,7 @@ export function ItemList(props: {
   const chips = createMemo(() => {
     const filters = vault.filters();
     const output: Array<{ id: string; label: string; tone?: string; clear(): void }> = [];
-    for (const tag of filters.tags) output.push({ id: `tag:${tagKey(tag)}`, label: tag, clear: () => vault.updateFilters({ tags: filters.tags.filter((value) => tagKey(value) !== tagKey(tag)) }) });
+    for (const tag of filters.tags) output.push({ id: `tag:${tag}`, label: tag, clear: () => vault.updateFilters({ tags: filters.tags.filter((value) => value !== tag) }) });
     if (filters.untagged) output.push({ id: "untagged", label: "Without tags", clear: () => vault.updateFilters({ untagged: false }) });
     if (filters.view === "favorites") output.push({ id: "view", label: "Favorites", clear: () => vault.updateFilters({ view: "all" }) });
     if (filters.type !== "all") {
@@ -146,12 +148,14 @@ export function ItemList(props: {
 
   return (
     <section class="item-column" aria-label="Items">
+      <Show when={organizing()}><OrganizeItems items={vault.visibleItems()} onClose={() => setOrganizing(false)} /></Show>
       <header class="column-header">
         <div class="column-heading">
           <h1>{heading()}</h1>
           <span class="column-count">{countLabel()}</span>
         </div>
-        <Show when={vault.filters().type === "password" || vault.filters().type === "all"}><TagFilter /></Show>
+        <TagFilter />
+        <Button size="sm" disabled={!vault.visibleItems().length || vault.rawSecrets()} onClick={() => setOrganizing(true)}>Organize</Button>
         <Show when={vault.filters().type === "secret"}>
           <Switch
             label="Show raw records"
@@ -282,7 +286,7 @@ function ItemRow(props: {
           </Show>
         </span>
         <span class="item-subtitle">{subtitle()}</span>
-        <Show when={!props.compact && isPassword() && props.item.tags?.length}>
+        <Show when={!props.compact && props.item.tags?.length}>
           <span class="item-tags">
             <For each={props.item.tags?.slice(0, 2)}>{(tag) => <span class="password-tag">{tag}</span>}</For>
             <Show when={(props.item.tags?.length ?? 0) > 2}><span class="tag-count">+{props.item.tags!.length - 2}</span></Show>

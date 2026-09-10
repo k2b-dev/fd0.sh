@@ -95,6 +95,18 @@ export type SyncPreparation = {
   requiresConfirmation: boolean;
 };
 
+export type OrganizationItem = {
+ id: string; scopeId: string; scope: string; name: string; title: string;
+ kind: string; tags: string[] | null; revision: string; references?: string[];
+};
+export type OrganizationScopePolicy = { id: string; label: string; members: number; revision: string };
+export type OrganizationBatch = {
+ scopes?: OrganizationScopePolicy[];
+ items: OrganizationItem[]; operation: "add" | "remove" | "set" | "clear" | "move";
+ tags?: string[]; targetScopeId?: string; dryRun: boolean; resume?: boolean;
+};
+export type OrganizationBatchResult = { scopes?: OrganizationScopePolicy[]; items: OrganizationItem[]; completed: string[]; dryRun: boolean };
+
 export type ItemSummary = {
   id: string;
   scopeId: string;
@@ -511,6 +523,9 @@ export type DesktopAPI = {
   copyText(value: string): Promise<{ clearAfterSeconds: number }>;
   savePass(input: SavePassInput): Promise<{ ok: boolean }>;
   editPass(ref: RecordRef): Promise<SavePassInput | null>;
+  organizationInventory(): Promise<OrganizationItem[]>;
+  organizeItems(request: OrganizationBatch): Promise<OrganizationBatchResult>;
+  setItemTags(ref: RecordRef, tags: string[], expectedTags?: string[]): Promise<{ ok: boolean }>;
   setFavorite(ref: RecordRef, favorite: boolean): Promise<{ ok: boolean }>;
   pickAttachment(): Promise<AttachmentValue | null>;
   saveSecret(input: SaveSecretInput): Promise<{ ok: boolean }>;

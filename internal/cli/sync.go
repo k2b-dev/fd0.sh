@@ -68,6 +68,7 @@ const (
 )
 
 type syncRunBudget struct {
+	scopes          map[string]bool // nil syncs all; organization moves restrict destination scopes.
 	membershipPages int
 }
 
@@ -157,8 +158,10 @@ func runSyncRound(ctx context.Context, server string, pushLimit int, budget *syn
 	if err := s.EnsureUserRegistered(ctx, serverURL); err != nil {
 		return fmt.Errorf("user registration: %w", err)
 	}
-	if err := s.repairNonContiguousScopes(ctx, wcc, serverURL); err != nil {
-		return err
+	if budget.scopes == nil {
+		if err := s.repairNonContiguousScopes(ctx, wcc, serverURL); err != nil {
+			return err
+		}
 	}
 
 	// Per-server state key for vault lookups. Each pinned server has
@@ -193,6 +196,9 @@ func runSyncRound(ctx context.Context, server string, pushLimit int, budget *syn
 	// singular sd.LastSTH for backward compat on first sync.
 	preSyncLastSTH := map[string]*VerifiedSTH{}
 	for sid, sd := range s.Body.Scopes {
+		if budget.scopes != nil && !budget.scopes[sid] {
+			continue
+		}
 		preSyncLastSTH[sid], _ = decodeVerifiedSTH(sd.LastSTHFor(serverKey))
 	}
 
@@ -201,6 +207,9 @@ func runSyncRound(ctx context.Context, server string, pushLimit int, budget *syn
 	// routing and (by construction) no possibility of replica divergence.
 	pullScopes := map[string]pullCursor{}
 	for sid, sd := range s.Body.Scopes {
+		if budget.scopes != nil && !budget.scopes[sid] {
+			continue
+		}
 		pullScopes[sid] = pullCursor{
 			Seq:         sd.ChainTip.Seq,
 			Hash:        sd.ChainTip.Hash,
@@ -221,6 +230,9 @@ func runSyncRound(ctx context.Context, server string, pushLimit int, budget *syn
 	// data loss is impossible by construction.
 	pushItems := []any{}
 	for sid, sd := range s.Body.Scopes {
+		if budget.scopes != nil && !budget.scopes[sid] {
+			continue
+		}
 		evs, err := chain.ReadScopeEvents(s.Paths.ScopeChain(proto.MustParseScopeID(sid)))
 		if err != nil {
 			return err
@@ -299,6 +311,18 @@ func runSyncRound(ctx context.Context, server string, pushLimit int, budget *syn
 	}
 	if err := proto.Unmarshal(rb, &sr); err != nil {
 		return fmt.Errorf("sync: decode resp: %w", err)
+	}
+	if budget.scopes != nil {
+		for sid := range sr.Pull {
+			if !budget.scopes[sid] {
+				return errors.New("scoped sync returned an unrequested scope")
+			}
+		}
+		for _, result := range sr.Push {
+			if result.ScopeID != "" && !budget.scopes[result.ScopeID] {
+				return errors.New("scoped sync returned an unrequested scope")
+			}
+		}
 	}
 	// Apply pulled events for each known scope.
 	dirty := false

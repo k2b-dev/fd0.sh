@@ -332,7 +332,7 @@ func (s *Session) RestoreSecretVersion(ctx context.Context, scopeOrLabel, name s
 	if err != nil {
 		return fmt.Errorf("secret %q version %d: %w", name, seq, err)
 	}
-	return s.writeTypedSecretPayload(ctx, scopeID, name, target.Record.Type, payload, false, "")
+	return s.writeTypedSecretPayload(ctx, scopeID, name, target.Record.Type, payload, false, "", target.Record)
 }
 
 // restorePayload prepares a historical payload to be written back as the
