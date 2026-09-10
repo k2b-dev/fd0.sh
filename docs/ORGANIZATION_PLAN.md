@@ -1,6 +1,6 @@
 # Organizing fd0 without exposing secret values
 
-Status: implemented and verified locally. Not released. The production installation and user vault are out of scope.
+Status: released as CLI 0.16.0 and Desktop 0.6.0 on 2026-09-10. The production installation and user vault were not changed.
 
 ## Accepted outcome
 
@@ -31,7 +31,15 @@ The repository Go suites and simulator suite were exercised. Final affected-pack
 
 The isolated integration test runs real CLI, agent, server, Desktop bridge and MCP processes. It checks offline source retention, acknowledged destination writes, resumption, CLI saved previews, independent MCP approval, secret canaries on both output pipes, literal Desktop secret values, tag preservation on rename and stale-tag rejection. Its wrapper verifies that the production binary and agent state remain unchanged.
 
-The skill passes the skill validator. Harper findings were reviewed; product names and technical terminology were retained. No Electron app was packaged or launched, no real vault was opened for this task, and no commit, push or release was performed.
+The skill passes the skill validator. Harper findings were reviewed; product names and technical terminology were retained. Local verification did not package or launch Electron or open the real vault.
+
+## Release verification
+
+Implementation commit `776cea1733e0275c871662dcd65a1deb5b110c24` passed the complete [main CI](https://github.com/k2b-dev/fd0.sh/actions/runs/34498683872), including both operating systems and the isolated organization integration test. Both release workflows succeeded: [CLI](https://github.com/k2b-dev/fd0.sh/actions/runs/34499898577) and [Desktop](https://github.com/k2b-dev/fd0.sh/actions/runs/34499898115).
+
+The published CLI checksum signature and all eight archives were verified. The downloaded macOS ARM64 binary reports version 0.16.0 and exposes the organization commands. The published Desktop manifest signature and all 23 covered files were verified; all four updater manifests have the correct version, artifact sizes, and SHA512 hashes. The release manifest points to the implementation commit. CI verified macOS signing and notarization for both architectures and Linux packages on clean systems.
+
+Releases: [CLI 0.16.0](https://github.com/k2b-dev/fd0.sh/releases/tag/v0.16.0) and [Desktop 0.6.0](https://github.com/k2b-dev/fd0.sh/releases/tag/desktop-v0.6.0). The local production installation was not updated.
 
 ## Operational boundaries
 
