@@ -31,6 +31,8 @@ async function withPage(run: (page: Page) => Promise<void>) {
     await page.addStyleTag({ content: css });
     await page.addScriptTag({ content: code });
     await page.evaluate(() => window.navigationTest.ready());
+    expect(await page.evaluate(() => window.navigationTest.state())).toMatchObject({ selected: "", detail: undefined });
+    await page.evaluate(() => window.navigationTest.select("Login"));
     await run(page);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
@@ -49,7 +51,7 @@ test("global search crosses filters and Back restores the password context", () 
 }));
 
 test("linked SSH key returns to its host and search context", () => withPage(async (page) => {
-  await page.evaluate(() => { window.navigationTest.filter({ type: "ssh" }); window.navigationTest.query("Host"); window.navigationTest.narrow(true); });
+  await page.evaluate(() => { window.navigationTest.filter({ type: "ssh" }); window.navigationTest.query("Host"); window.navigationTest.select("Host"); window.navigationTest.narrow(true); });
   await page.getByRole("button", { name: "Open SSH key Key", exact: true }).click();
   expect(await page.evaluate(() => window.navigationTest.state())).toMatchObject({ selected: "Key", detail: "Key", back: "Host" });
   await page.getByRole("button", { name: "Back to Host", exact: true }).click();

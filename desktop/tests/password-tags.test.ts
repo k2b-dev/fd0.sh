@@ -120,6 +120,7 @@ test("filter popup is keyboard accessible and detail tags activate a filter", ()
   expect(await page.evaluate(() => window.tagsTest.visible())).toEqual(["Work login"]);
   await page.keyboard.press("Escape");
   expect(await trigger.evaluate((node) => node === document.activeElement)).toBe(true);
+  await page.locator("[data-item-id]").filter({ hasText: "Work login" }).click();
   await page.getByRole("button", { name: "Filter by tag Work", exact: true }).click();
   expect(await page.evaluate(() => window.tagsTest.filters().tags)).toEqual(["Work"]);
 }));

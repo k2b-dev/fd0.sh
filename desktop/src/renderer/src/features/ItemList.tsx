@@ -80,14 +80,10 @@ export function ItemList(props: {
     ];
   });
 
-  // Keep the DOM selection in sync so arrow keys resume from the right place.
+  // Preserve explicit selections, but never open an arbitrary item by default.
   createEffect(() => {
-    const items = displayItems();
-    if (items.length === 0) {
-      if (vault.selectedID()) vault.setSelectedID("");
-      return;
-    }
-    if (!items.some((item) => item.id === vault.selectedID())) vault.setSelectedID(items[0]!.id);
+    const selected = vault.selectedID();
+    if (selected && !displayItems().some((item) => item.id === selected)) vault.setSelectedID("");
   });
 
   function moveSelection(delta: number): void {
