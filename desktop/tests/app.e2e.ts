@@ -1282,6 +1282,11 @@ test("runs the isolated desktop vault end to end", async () => {
     await expect(page.getByRole("dialog", { name: "Search and commands" }).getByRole("combobox")).toBeFocused();
     await page.keyboard.press("Escape");
 
+    await expect(page.getByText("Select an item", { exact: true })).toBeVisible();
+    await itemRow(page, "GitHub").click();
+    await expect(page.locator(".detail-header")).toBeVisible();
+    await expect(page.locator(".field-row").first()).toBeVisible();
+
     const themeLayout = await page.evaluate(() => {
       const selectors = [
         ".app",
