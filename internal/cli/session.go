@@ -52,6 +52,16 @@ type Session struct {
 // giving up. The agent-spawned auto-sync sets FD0_LOCK_WAIT=60s so it queues
 // politely behind interactive CLI calls.
 func Open(ctx context.Context) (*Session, error) {
+	return openSession(ctx, "")
+}
+
+// OpenSSHSession queues the shared SSH fetch behind ordinary vault activity.
+// Its caller supplies a deadline; interactive CLI lock budgets are unchanged.
+func OpenSSHSession(ctx context.Context) (*Session, error) {
+	return openSession(ctx, "1m")
+}
+
+func openSession(ctx context.Context, lockWait string) (*Session, error) {
 	paths, err := fdhome.Resolve()
 	if err != nil {
 		return nil, err
@@ -64,7 +74,13 @@ func Open(ctx context.Context) (*Session, error) {
 	}
 	cfg, _ := fdhome.LoadConfig(paths.Config) // missing/bad config → defaults
 	lk := flock.New(paths.Lock)
-	if err := acquireLock(ctx, lk, cfg.Client.LockWait); err != nil {
+	var lockErr error
+	if lockWait == "" {
+		lockErr = acquireLock(ctx, lk, cfg.Client.LockWait)
+	} else {
+		lockErr = acquireLockFor(ctx, lk, lockWait)
+	}
+	if err := lockErr; err != nil {
 		return nil, err
 	}
 	cli := agent.NewClient(paths.AgentSock)
@@ -211,12 +227,19 @@ func acquireLock(ctx context.Context, lk *flock.Flock, configWait string) error 
 	if wait == "" {
 		wait = defaultLockWait
 	}
+	return acquireLockFor(ctx, lk, wait)
+}
+
+func acquireLockFor(ctx context.Context, lk *flock.Flock, wait string) error {
 	d, err := time.ParseDuration(wait)
 	if err != nil {
 		return fmt.Errorf("lock_wait %q: %w", wait, err)
 	}
 	deadline := time.Now().Add(d)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		ok, err := lk.TryLock()
 		if err != nil {
 			return fmt.Errorf("lock: %w", err)

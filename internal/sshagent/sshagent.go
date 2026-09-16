@@ -29,6 +29,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -46,17 +47,12 @@ type KeyEntry struct {
 	Comment string // free-form; falls back to key.Comment if empty
 }
 
-// KeyProvider abstracts where the agent gets its keys from. In
-// production this is wired to the vault layer; in tests it can be a
-// static slice. Implementations must be safe for concurrent calls —
-// the agent answers list/sign requests from multiple sockets in
-// parallel.
+// KeyProvider lends keys only for the duration of an operation. Implementations
+// must coordinate the callback with vault lock and expiry and must be safe for
+// concurrent calls. A locked vault calls use with an empty slice; fetch failures
+// return an error. Callers must never retain private key material.
 type KeyProvider interface {
-	// Keys returns the currently-available keys. An empty slice (not
-	// an error) is the canonical "vault is locked / no keys here"
-	// response — the SSH client treats it as "no identities" and the
-	// user sees no surprise crash.
-	Keys() ([]KeyEntry, error)
+	WithKeys(use func([]KeyEntry) error) error
 }
 
 // fd0Agent implements agent.Agent (golang.org/x/crypto/ssh/agent).
@@ -73,30 +69,26 @@ func New(src KeyProvider) agent.Agent {
 	return &fd0Agent{src: src}
 }
 
-// List returns the public keys currently available. It NEVER returns
-// an error to the wire even if the provider errored — agent clients
-// often interpret errors as a protocol-level abort and stop the whole
-// session. An empty list is the safer degradation.
+// List returns public identities. Internal failures remain protocol failures,
+// distinct from a successfully read empty or locked vault.
 func (a *fd0Agent) List() ([]*agent.Key, error) {
-	entries, err := a.src.Keys()
+	var out []*agent.Key
+	err := a.src.WithKeys(func(entries []KeyEntry) error {
+		for _, e := range entries {
+			pub, err := e.Key.PublicKey()
+			if err != nil {
+				return errors.New("sshagent: invalid public key")
+			}
+			comment := e.Comment
+			if comment == "" {
+				comment = e.Key.Comment
+			}
+			out = append(out, &agent.Key{Format: pub.Type(), Blob: pub.Marshal(), Comment: comment})
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, nil
-	}
-	out := make([]*agent.Key, 0, len(entries))
-	for _, e := range entries {
-		pub, err := e.Key.PublicKey()
-		if err != nil {
-			continue
-		}
-		comment := e.Comment
-		if comment == "" {
-			comment = e.Key.Comment
-		}
-		out = append(out, &agent.Key{
-			Format:  pub.Type(),
-			Blob:    pub.Marshal(),
-			Comment: comment,
-		})
+		return nil, errors.New("sshagent: cannot list identities")
 	}
 	return out, nil
 }
@@ -110,26 +102,32 @@ func (a *fd0Agent) List() ([]*agent.Key, error) {
 // imported RSA keys deliberately decline RFC 8332 newer SHA modes —
 // callers should rotate to ed25519 instead.
 func (a *fd0Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
-	entries, err := a.src.Keys()
+	var signature *ssh.Signature
+	err := a.src.WithKeys(func(entries []KeyEntry) error {
+		target := key.Marshal()
+		for _, e := range entries {
+			pub, err := e.Key.PublicKey()
+			if err != nil {
+				return errors.New("sshagent: invalid public key")
+			}
+			if !equalBytes(pub.Marshal(), target) {
+				continue
+			}
+			signer, err := e.Key.Signer()
+			if err != nil {
+				return errors.New("sshagent: invalid signing key")
+			}
+			signature, err = signer.Sign(rand.Reader, data)
+			return err
+		}
+		return errors.New("sshagent: no matching identity")
+	})
+	// x/crypto's protocol server logs returned errors. Never expose provider
+	// details, key comments, or decoded payloads through that logging path.
 	if err != nil {
-		return nil, fmt.Errorf("sshagent: get keys: %w", err)
+		return nil, errors.New("sshagent: signing unavailable")
 	}
-	target := key.Marshal()
-	for _, e := range entries {
-		pub, err := e.Key.PublicKey()
-		if err != nil {
-			continue
-		}
-		if !equalBytes(pub.Marshal(), target) {
-			continue
-		}
-		signer, err := e.Key.Signer()
-		if err != nil {
-			return nil, fmt.Errorf("sshagent: signer for %q: %w", e.Comment, err)
-		}
-		return signer.Sign(rand.Reader, data)
-	}
-	return nil, errors.New("sshagent: no matching identity")
+	return signature, nil
 }
 
 // SignWithFlags falls back to Sign — see comment above for rationale.
@@ -164,22 +162,32 @@ func (a *fd0Agent) Unlock(_ []byte) error {
 	return errors.New("sshagent: Unlock not supported (use `fd0 unlock`)")
 }
 
-// Signers returns concrete ssh.Signer for every available identity.
-// Some go-ssh clients call this directly instead of via the
-// List+Sign roundtrip; we serve it so they don't error out.
+// Signers returns proxies that reauthorize every signature, never raw signers
+// that could retain private keys after vault lock.
 func (a *fd0Agent) Signers() ([]ssh.Signer, error) {
-	entries, err := a.src.Keys()
+	keys, err := a.List()
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
-	out := make([]ssh.Signer, 0, len(entries))
-	for _, e := range entries {
-		s, err := e.Key.Signer()
-		if err == nil {
-			out = append(out, s)
+	out := make([]ssh.Signer, 0, len(keys))
+	for _, key := range keys {
+		pub, err := ssh.ParsePublicKey(key.Blob)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, &liveSigner{agent: a, public: pub})
 	}
 	return out, nil
+}
+
+type liveSigner struct {
+	agent  *fd0Agent
+	public ssh.PublicKey
+}
+
+func (s *liveSigner) PublicKey() ssh.PublicKey { return s.public }
+func (s *liveSigner) Sign(_ io.Reader, data []byte) (*ssh.Signature, error) {
+	return s.agent.Sign(s.public, data)
 }
 
 // equalBytes compares two byte slices in constant time. Public keys

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net"
@@ -18,7 +19,7 @@ func TestExistingSSHConnectionLosesSigningAuthorityAfterLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := newLifecycleTestServer(t, time.Hour, time.Hour)
-	fetcher := func() ([]fd0sshagent.KeyEntry, error) {
+	fetcher := func(context.Context) ([]fd0sshagent.KeyEntry, error) {
 		if !srv.handleStatus().Status.Unlocked {
 			return nil, nil
 		}
@@ -31,7 +32,7 @@ func TestExistingSSHConnectionLosesSigningAuthorityAfterLock(t *testing.T) {
 		handleSSHConn(
 			slog.New(slog.NewTextHandler(io.Discard, nil)),
 			serverConn,
-			fetcher,
+			&liveSSHProvider{ctx: context.Background(), server: srv, fetcher: fetcher},
 		)
 		close(done)
 	}()

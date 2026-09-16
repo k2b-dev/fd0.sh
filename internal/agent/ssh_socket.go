@@ -14,54 +14,108 @@ package agent
 //   - Sign + List only (Bitwarden minimalism); add/remove/lock at
 //     the protocol level are explicitly refused.
 //
-// Concurrency:
-//   - The fd0-agent main IPC and the SSH agent socket run on
-//     separate goroutines. Every list/sign operation re-fetches the
-//     current key set so lock and expiry revoke already-open SSH
-//     connections immediately.
+// Concurrent operations share only an in-flight fetch. Completed snapshots are
+// not cached, so later requests observe key additions, edits, removal and sync.
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/valentinkolb/fd0.sh/internal/sshagent"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/sync/singleflight"
 )
 
 // SSHKeyFetcher is what the agent uses to enumerate available SSH
 // keys. The concrete implementation lives in cmd/fd0-agent so it can
 // import cli.CollectKeyEntries without the agent package taking a cli
 // dependency (which would be a cycle).
-type SSHKeyFetcher func() ([]sshagent.KeyEntry, error)
+type SSHKeyFetcher func(context.Context) ([]sshagent.KeyEntry, error)
 
-// liveSSHProvider re-fetches keys for every SSH-agent operation. A provider
-// captured at connection time would retain private signing material after the
-// vault is locked.
+// liveSSHProvider is shared by every connection on a socket. The server mutex
+// is never held during a fetch (which calls back into the agent over IPC).
 type liveSSHProvider struct {
-	log     *slog.Logger
+	ctx     context.Context
+	server  *Server
 	fetcher SSHKeyFetcher
+	flights singleflight.Group
 }
 
-func (p *liveSSHProvider) Keys() ([]sshagent.KeyEntry, error) {
-	keys, err := p.fetcher()
-	if err != nil {
-		p.log.Debug("ssh-agent: fetch failed, serving empty", "err", err)
-		return nil, err
+func (p *liveSSHProvider) WithKeys(use func([]sshagent.KeyEntry) error) error {
+	ctx, cancel := context.WithTimeout(p.ctx, time.Minute)
+	defer cancel()
+	s := p.server
+	s.mu.Lock()
+	epoch := s.unlockSession
+	s.mu.Unlock()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.expireUnlockedHeld(time.Now())
+		if s.superPriv == nil || s.unlockSession != epoch {
+			defer s.mu.Unlock()
+			return use(nil)
+		}
+		revision := s.sshRevision
+		// New sessions and committed writes must not join an older snapshot.
+		result := p.flights.DoChan(fmt.Sprintf("%s/%d", epoch, revision), func() (any, error) {
+			fetchCtx, stop := context.WithTimeout(p.ctx, time.Minute)
+			defer stop()
+			return p.fetcher(fetchCtx)
+		})
+		s.mu.Unlock()
+		var fetched singleflight.Result
+		select {
+		case fetched = <-result:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		s.mu.Lock()
+		s.expireUnlockedHeld(time.Now())
+		if s.superPriv == nil || s.unlockSession != epoch {
+			defer s.mu.Unlock()
+			return use(nil)
+		}
+		if s.sshRevision != revision {
+			s.mu.Unlock()
+			continue // A writer committed during fetch; read its new state.
+		}
+		defer s.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if fetched.Err != nil {
+			return errors.New("ssh-agent: key fetch failed")
+		}
+		keys := fetched.Val.([]sshagent.KeyEntry)
+		// Key use, committed writes and lock have one ordering. Slow file/IPC
+		// work is outside this mutex and never delays vault lock.
+		if err := use(keys); err != nil {
+			return err
+		}
+		s.lastActivity = time.Now()
+		s.signalLifecycle()
+		return nil
 	}
-	return keys, nil
 }
 
-// StartSSHSocket launches the SSH-agent socket listener. The fetcher
-// is called for every list/sign operation and MUST be safe to call
-// concurrently. Returns a stop function the caller invokes at shutdown.
-func StartSSHSocket(ctx context.Context, log *slog.Logger, socketPath string, fetcher SSHKeyFetcher) (func(), error) {
+// StartSSHSocket launches the SSH-agent socket listener. Overlapping requests
+// in one unlock session share a fetch; different unlock sessions may overlap.
+// The fetcher must honor cancellation and be safe for concurrent calls.
+func (s *Server) StartSSHSocket(ctx context.Context, log *slog.Logger, socketPath string, fetcher SSHKeyFetcher) (func(), error) {
 	l, err := sshagent.Listen(socketPath)
 	if err != nil {
 		return nil, err
 	}
 	log.Info("ssh-agent socket listening", "sock", socketPath)
+	provider := &liveSSHProvider{ctx: ctx, server: s, fetcher: fetcher}
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
@@ -69,13 +123,13 @@ func StartSSHSocket(ctx context.Context, log *slog.Logger, socketPath string, fe
 		for {
 			conn, err := l.Accept()
 			if err != nil {
-				if ctx.Err() != nil {
+				if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 					return
 				}
 				log.Warn("ssh-agent accept", "err", err)
 				continue
 			}
-			go handleSSHConn(log, conn, fetcher)
+			go handleSSHConn(log, conn, provider)
 		}
 	}()
 	stop := func() {
@@ -85,16 +139,11 @@ func StartSSHSocket(ctx context.Context, log *slog.Logger, socketPath string, fe
 	return stop, nil
 }
 
-// handleSSHConn serves the connection against live vault state. On a locked
-// vault the fetcher returns an empty list (or an error which the protocol
-// adapter treats as empty for List), so stale connections lose signing
-// authority without requiring the client to reconnect.
-func handleSSHConn(log *slog.Logger, conn net.Conn, fetcher SSHKeyFetcher) {
+// handleSSHConn never captures signing material for a connection's lifetime.
+func handleSSHConn(log *slog.Logger, conn net.Conn, provider sshagent.KeyProvider) {
 	defer conn.Close()
-	a := sshagent.New(&liveSSHProvider{log: log, fetcher: fetcher})
+	a := sshagent.New(provider)
 	if err := agent.ServeAgent(a, conn); err != nil {
-		// Common: connection closed by client (ssh.EOF). Logged at
-		// debug because every successful auth tears the connection.
 		log.Debug("ssh-agent: serve finished", "err", err)
 	}
 }

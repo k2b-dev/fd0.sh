@@ -122,6 +122,19 @@ func TestAgentRoundtrip(t *testing.T) {
 	if string(got) != string(want) {
 		t.Fatalf("got %q want %q", got, want)
 	}
+	// A successful vault commit invalidates any in-flight SSH snapshot.
+	srv.mu.Lock()
+	beforeRevision := srv.sshRevision
+	srv.mu.Unlock()
+	if err := cli.ReSeal(paths.Vault, ur.RedactedBody); err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	afterRevision := srv.sshRevision
+	srv.mu.Unlock()
+	if afterRevision != beforeRevision+1 {
+		t.Fatal("vault commit did not invalidate SSH snapshot")
+	}
 	// Lock.
 	if err := cli.Lock(); err != nil {
 		t.Fatal(err)

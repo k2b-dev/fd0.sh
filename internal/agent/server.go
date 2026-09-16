@@ -77,6 +77,7 @@ type Server struct {
 	userSuperPub  []byte
 	redactedBody  []byte // cached cbor(VaultBody) with super_priv zeroed
 	unlockedAt    time.Time
+	sshRevision   uint64 // incremented when a vault write commits
 	unlockSession string
 	lastActivity  time.Time
 	lifecycleWake chan struct{}
@@ -256,6 +257,10 @@ func (s *Server) enforceLifetime(now time.Time) bool {
 func (s *Server) expireUnlocked(now time.Time) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.expireUnlockedHeld(now)
+}
+
+func (s *Server) expireUnlockedHeld(now time.Time) string {
 	if s.superPriv == nil {
 		return ""
 	}
@@ -681,6 +686,7 @@ func (s *Server) handleReSeal(r *ReSealReq) *Response {
 		crypto.Wipe(s.redactedBody)
 	}
 	s.redactedBody = append([]byte(nil), r.RedactedBody...)
+	s.sshRevision++
 	return &Response{ReSeal: &ReSealResp{}}
 }
 

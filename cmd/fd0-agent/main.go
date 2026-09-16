@@ -173,18 +173,18 @@ func main() {
 	if sshSock == "" {
 		log.Info("ssh-agent socket disabled", "reason", "FD0_SSH_SOCK is empty")
 	} else {
-		stopSSH, err := agent.StartSSHSocket(ctx, log, sshSock, func() ([]sshagent.KeyEntry, error) {
+		stopSSH, err := srv.StartSSHSocket(ctx, log, sshSock, func(fetchCtx context.Context) ([]sshagent.KeyEntry, error) {
 			// We open a CLI session per fetch — see ssh_socket.go for
 			// the concurrency notes. The flock is released by the
 			// session's Close before we return.
-			s, err := fd0cli.Open(context.Background())
+			s, err := fd0cli.OpenSSHSession(fetchCtx)
 			if err != nil {
-				return nil, nil // locked / unavailable → empty list
+				return nil, err
 			}
 			defer s.Close()
 			raw, err := fd0cli.CollectKeyEntries(s)
 			if err != nil {
-				return nil, nil
+				return nil, err
 			}
 			out := make([]sshagent.KeyEntry, len(raw))
 			for i, e := range raw {

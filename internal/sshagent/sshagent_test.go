@@ -1,6 +1,7 @@
 package sshagent
 
 import (
+	"errors"
 	"net"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ type staticProvider struct {
 	keys []KeyEntry
 }
 
-func (s *staticProvider) Keys() ([]KeyEntry, error) { return s.keys, nil }
+func (s *staticProvider) WithKeys(use func([]KeyEntry) error) error { return use(s.keys) }
 
 func TestListAndSignViaSocket(t *testing.T) {
 	// Two ed25519 keys.
@@ -141,5 +142,31 @@ func TestEnsureSocketDirRemovesStale(t *testing.T) {
 	// Second EnsureSocketDir should clean it up.
 	if err := EnsureSocketDir(sock); err != nil {
 		t.Fatalf("second EnsureSocketDir: %v", err)
+	}
+}
+
+type failingProvider struct{}
+
+func (failingProvider) WithKeys(func([]KeyEntry) error) error {
+	return errors.New("PRIVATE_ERROR_CANARY")
+}
+
+func TestProviderFailuresAreNotEmptySuccessOrSecretLogs(t *testing.T) {
+	a := New(failingProvider{})
+	key, err := sshkey.NewEd25519("synthetic", "synthetic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, _ := key.PublicKey()
+	_, listErr := a.List()
+	_, signErr := a.Sign(pub, []byte("challenge"))
+	_, signersErr := a.Signers()
+	for _, err := range []error{listErr, signErr, signersErr} {
+		if err == nil {
+			t.Fatal("provider failure swallowed")
+		}
+		if strings.Contains(err.Error(), "PRIVATE_ERROR_CANARY") {
+			t.Fatal("provider details reached protocol logging")
+		}
 	}
 }
