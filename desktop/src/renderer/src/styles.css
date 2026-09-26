@@ -1120,6 +1120,21 @@ h1, h2, h3, p { margin: 0; }
 .auth-footnote { display: flex; align-items: center; gap: var(--space-2); color: var(--text-4); font-size: var(--text-xs); }
 .auth-footnote code { font-family: var(--font-mono); }
 
+.auth-ssh-grants { align-self: stretch; color: var(--text-3); font-size: var(--text-xs); }
+.auth-ssh-grants > summary {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+}
+.auth-ssh-grants > summary:hover { color: var(--text); background: var(--surface-hover); }
+.auth-ssh-grants > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.auth-ssh-grants-content { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-3); }
+.auth-ssh-grants-content p { margin: 0; font-size: var(--text-xs); line-height: var(--leading-loose); }
+
 .unlock-glyph {
   display: grid;
   place-items: center;

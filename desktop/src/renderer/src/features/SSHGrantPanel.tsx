@@ -104,12 +104,15 @@ export function ActiveSSHGrants(props: { status: VaultStatus | null; onStatus(st
     finally { if (alive) setBusy(false); }
   }
   return <Show when={(props.status?.sshGrantCount ?? 0) > 0}>
-    <section class="field-section" aria-label="Active SSH grants">
-      <h2 class="section-heading">{props.status?.sshGrantCount} SSH {(props.status?.sshGrantCount ?? 0) === 1 ? "grant remains" : "grants remain"} active</h2>
-      <For each={grants()}>{(g) => <Button disabled={busy()} onClick={() => void window.fd0.openSSHHost({ scopeId: g.scopeId, name: `host:${g.name}` }).catch((cause) => { if (alive) setError(grantError(cause)); })}>Open SSH: {g.name}</Button>}</For>
-      <Button disabled={busy()} onClick={() => void lockAll()}>Lock everything</Button>
-      <p>Stops new SSH authentication until the next unlock. Existing connections stay open.</p>
-      <Show when={error()}><p role="alert">{error()}</p></Show>
-    </section>
+    <details class="auth-ssh-grants">
+      <summary>{props.status?.sshGrantCount} active SSH {(props.status?.sshGrantCount ?? 0) === 1 ? "grant" : "grants"}</summary>
+      <div class="auth-ssh-grants-content">
+        <p>These hosts remain accessible while fd0 is locked.</p>
+        <For each={grants()}>{(g) => <Button disabled={busy()} onClick={() => void window.fd0.openSSHHost({ scopeId: g.scopeId, name: `host:${g.name}` }).catch((cause) => { if (alive) setError(grantError(cause)); })}>Open SSH: {g.name}</Button>}</For>
+        <Button disabled={busy()} onClick={() => void lockAll()}>Lock everything</Button>
+        <p>Stops new SSH authentication until the next unlock. Existing connections stay open.</p>
+        <Show when={error()}><p role="alert">{error()}</p></Show>
+      </div>
+    </details>
   </Show>;
 }

@@ -21,7 +21,6 @@ export function Unlock(props: {
           </div>
           <h1>Unlock fd0</h1>
           <p>Your vault stays encrypted until you unlock it on this device.</p>
-          <ActiveSSHGrants status={props.status} onStatus={props.onUnlock} />
           <AuthenticationForm status={props.status} submitLabel="Unlock" pendingLabel="Unlocking…"
             onAuthenticate={async (input) => props.onUnlock(await window.fd0.unlock(input))} />
           <Show when={window.fd0.development}>
@@ -29,6 +28,7 @@ export function Unlock(props: {
               Development vault <code>fd0-desktop-dev</code>
             </p>
           </Show>
+          <ActiveSSHGrants status={props.status} onStatus={props.onUnlock} />
         </div>
       </main>
     </div>
