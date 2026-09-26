@@ -38,7 +38,11 @@ func (s *Service) sshGrant(ctx context.Context, p SSHGrantParams) (*agent.SSHGra
 		if err != nil {
 			return nil, err
 		}
-		r.Authentication = &agent.UnlockReq{MethodType: method.MethodType, Passphrase: p.Passphrase, YubikeyPIN: p.PIN}
+		credential, err := authenticationCredential(*method, p.Passphrase, p.PIN)
+		if err != nil {
+			return nil, err
+		}
+		r.Authentication = &agent.UnlockReq{MethodType: method.MethodType, Passphrase: credential.Passphrase, YubikeyPIN: credential.YubikeyPIN}
 	}
 	result, err := cli.ManageSSHGrant(ctx, r)
 	if err != nil {

@@ -1185,33 +1185,9 @@ func (s *Service) unlock(ctx context.Context, selector string, passphrase, pin [
 	if err != nil {
 		return StatusResult{}, err
 	}
-	var credential agent.UnlockCredential
-	switch method.MethodType {
-	case proto.AuthPassphrase:
-		if len(passphrase) == 0 {
-			return StatusResult{}, fail("validation", "Enter your vault passphrase.", "", false)
-		}
-		if len(pin) > 0 {
-			return StatusResult{}, fail("validation", "A YubiKey PIN cannot be used with passphrase unlock.", "", false)
-		}
-		credential.Passphrase = passphrase
-	case proto.AuthYubikey:
-		if len(passphrase) > 0 {
-			return StatusResult{}, fail("validation", "Your fd0 passphrase is not a YubiKey PIN.", "Choose Passphrase or clear the passphrase field.", false)
-		}
-		pinMode := yubikeyPINMode(*method)
-		if pinMode == "none" && len(pin) > 0 {
-			return StatusResult{}, fail("validation", "This YubiKey method is touch-only and does not use a PIN.", "Clear the PIN and try again.", false)
-		}
-		if pinMode == "required" && len(pin) == 0 {
-			return StatusResult{}, fail("validation", "Enter the YubiKey PIV PIN.", "", false)
-		}
-		if len(pin) > 0 && (len(pin) < 6 || len(pin) > 8) {
-			return StatusResult{}, fail("validation", "YubiKey PIV PINs are 6 to 8 characters.", "Do not enter your fd0 passphrase.", false)
-		}
-		credential.YubikeyPIN = pin
-	default:
-		return StatusResult{}, fail("method_unavailable", "This unlock method is not supported by fd0 Desktop.", "Use the fd0 CLI for this method.", false)
+	credential, err := authenticationCredential(*method, passphrase, pin)
+	if err != nil {
+		return StatusResult{}, err
 	}
 	if !client.IsRunning() {
 		if os.Getenv("FD0_AGENT_MANAGED") == "1" {

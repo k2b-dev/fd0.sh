@@ -84,32 +84,13 @@ func RunSSHGrant(ctx context.Context, scope, name, method, knownHosts string) er
 	if err != nil {
 		return err
 	}
-	if method == "" {
-		cfg, err := fdhome.LoadConfig(paths.Config)
-		if err != nil {
-			return err
-		}
-		method = cfg.Auth.DefaultMethod
-	}
-	chosen, err := pickUnlockMethod(methods, method)
+	chosen, credential, err := promptAuthentication(paths, methods, method)
+	defer crypto.Wipe(credential.Passphrase)
+	defer crypto.Wipe(credential.YubikeyPIN)
 	if err != nil {
 		return err
 	}
-	auth := &agent.UnlockReq{MethodType: chosen.MethodType}
-	switch chosen.MethodType {
-	case proto.AuthPassphrase:
-		auth.Passphrase, err = ReadPassphrase("Authorize SSH grant — passphrase: ")
-	case proto.AuthYubikey:
-		auth.YubikeyPIN, err = readYubikeyUnlockPIN(chosen, ReadOptionalPIN)
-		fmt.Fprintln(os.Stderr, "Touch your YubiKey if requested.")
-	default:
-		return errors.New("unsupported authentication method")
-	}
-	defer crypto.Wipe(auth.Passphrase)
-	defer crypto.Wipe(auth.YubikeyPIN)
-	if err != nil {
-		return err
-	}
+	auth := &agent.UnlockReq{MethodType: chosen.MethodType, Passphrase: credential.Passphrase, YubikeyPIN: credential.YubikeyPIN}
 	r.Action = "create"
 	r.Digest = preview.Digest
 	r.Authentication = auth

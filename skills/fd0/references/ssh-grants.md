@@ -17,7 +17,7 @@ restart before the keys become available again.
    ```
 
 3. The user reviews the SSH user, server, and key fingerprints, then authenticates
-   again with their vault passphrase or YubiKey. An already unlocked vault is
+   again using the same method chooser as unlock (passphrase or YubiKey). An already unlocked vault is
    insufficient. Never ask them to send credentials in chat, capture their input,
    or run this authorization command on their behalf. There is no `--yes`,
    password flag or organization-MCP tool for creating grants.

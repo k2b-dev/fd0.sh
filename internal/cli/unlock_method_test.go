@@ -114,7 +114,7 @@ func TestPromptUnlockMethod_SelectsSortedMethod(t *testing.T) {
 		{MethodID: "am_a", MethodType: proto.AuthPassphrase},
 	}
 	var output bytes.Buffer
-	got, err := promptUnlockMethod(active, strings.NewReader("2\n"), &output)
+	got, err := promptUnlockMethod(active, strings.NewReader("2\n"), &output, "")
 	if err != nil {
 		t.Fatalf("promptUnlockMethod: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestPromptUnlockMethod_EnterUsesFirstSortedMethod(t *testing.T) {
 		{MethodID: "am_z", MethodType: proto.AuthYubikey},
 		{MethodID: "am_a", MethodType: proto.AuthPassphrase},
 	}
-	got, err := promptUnlockMethod(active, strings.NewReader("\n"), &bytes.Buffer{})
+	got, err := promptUnlockMethod(active, strings.NewReader("\n"), &bytes.Buffer{}, "")
 	if err != nil {
 		t.Fatalf("promptUnlockMethod: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPromptUnlockMethod_RepromptsAfterInvalidSelection(t *testing.T) {
 		{MethodID: "am_b", MethodType: proto.AuthYubikey},
 	}
 	var output bytes.Buffer
-	got, err := promptUnlockMethod(active, strings.NewReader("nope\n3\n2\n"), &output)
+	got, err := promptUnlockMethod(active, strings.NewReader("nope\n3\n2\n"), &output, "")
 	if err != nil {
 		t.Fatalf("promptUnlockMethod: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestPromptUnlockMethod_ClosedInputFails(t *testing.T) {
 	_, err := promptUnlockMethod([]proto.AuthMethod{
 		{MethodID: "am_a", MethodType: proto.AuthPassphrase},
 		{MethodID: "am_b", MethodType: proto.AuthYubikey},
-	}, strings.NewReader(""), &bytes.Buffer{})
+	}, strings.NewReader(""), &bytes.Buffer{}, "")
 	if err == nil {
 		t.Fatal("expected closed input to fail")
 	}

@@ -167,11 +167,8 @@ func InitWithPassphrase(ctx context.Context, pass []byte) (*InitResult, error) {
 //
 // Method selection (in order):
 //  1. Explicit --method flag, if non-empty.
-//  2. Device-local auth default, if it still matches an enrolled method.
-//  3. Single-method auth.set: pick the only one.
-//  4. Multi-method auth.set on a TTY: ask the user.
-//  5. Multi-method auth.set without a TTY: pick the first method (sorted by
-//     method_id) so scripts remain deterministic.
+//  2. Multiple methods on a TTY: ask, preselecting the device-local default.
+//  3. Otherwise use the configured default or first method by method_id.
 //
 // For passphrase methods we prompt "Passphrase: ". For YubiKey methods
 // we inspect public_params.pin_policy: touch-only methods skip the PIN
@@ -196,41 +193,10 @@ func RunUnlock(ctx context.Context, agentBin, method string) error {
 		return errors.New("no auth methods on user chain — run `fd0 init` first")
 	}
 	activeMethods := uctx.LatestAuthSet.Payload.Active
-	chosen := proto.AuthMethod{}
-	usedConfiguredDefault := false
-	needsInteractiveChoice := false
-	if method == "" {
-		if cfg, err := fdhome.LoadConfig(paths.Config); err == nil {
-			if strings.TrimSpace(cfg.Auth.DefaultMethod) != "" {
-				if picked, err := pickUnlockMethod(activeMethods, cfg.Auth.DefaultMethod); err == nil {
-					chosen = picked
-					usedConfiguredDefault = true
-				} else {
-					fmt.Fprintf(os.Stderr, "warn: auth default %q no longer matches an enrolled method; falling back (use `fd0 auth default --clear` or set a new default)\n", cfg.Auth.DefaultMethod)
-				}
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "warn: load config: %v; ignoring auth default\n", err)
+	if method != "" {
+		if _, err := pickUnlockMethod(activeMethods, method); err != nil {
+			return err
 		}
-	}
-	if chosen.MethodID == "" && chosen.MethodType == "" {
-		if method != "" || len(activeMethods) <= 1 || !IsTTY(os.Stdin) || !IsTTY(os.Stderr) {
-			var err error
-			chosen, err = pickUnlockMethod(activeMethods, method)
-			if err != nil {
-				return err
-			}
-		} else {
-			needsInteractiveChoice = true
-		}
-	}
-	// When more than one method type is available and the user did
-	// NOT pass --method, surface the auto-pick on stderr so they can
-	// see which method was used. Silent picking is a footgun: a user
-	// who wants the YubiKey path could end up unlocked via passphrase
-	// and not realise.
-	if method == "" && !usedConfiguredDefault && !needsInteractiveChoice && len(distinctMethodTypes(activeMethods)) > 1 {
-		fmt.Fprintf(os.Stderr, "ℹ multiple unlock methods available — picked %q (override with --method=...)\n", chosen.MethodType)
 	}
 
 	c := agent.NewClient(paths.AgentSock)
@@ -257,34 +223,11 @@ func RunUnlock(ctx context.Context, agentBin, method string) error {
 		fmt.Fprintln(os.Stderr, "✓ vault already unlocked")
 		return nil
 	}
-	if needsInteractiveChoice {
-		chosen, err = promptUnlockMethod(activeMethods, os.Stdin, os.Stderr)
-		if err != nil {
-			return err
-		}
-	}
-
-	var cred agent.UnlockCredential
-	switch chosen.MethodType {
-	case proto.AuthPassphrase:
-		pass, err := ReadPassphrase("Passphrase: ")
-		if err != nil {
-			return err
-		}
-		cred.Passphrase = pass
-		defer crypto.Wipe(cred.Passphrase)
-	case proto.AuthYubikey:
-		pin, err := readYubikeyUnlockPIN(chosen, ReadOptionalPIN)
-		if err != nil {
-			return err
-		}
-		if len(pin) > 0 {
-			cred.YubikeyPIN = pin
-			defer crypto.Wipe(cred.YubikeyPIN)
-		}
-		fmt.Fprintln(os.Stderr, "Touch your YubiKey if it blinks…")
-	default:
-		return fmt.Errorf("unknown method type %q on user chain", chosen.MethodType)
+	chosen, cred, err := promptAuthentication(paths, activeMethods, method)
+	defer crypto.Wipe(cred.Passphrase)
+	defer crypto.Wipe(cred.YubikeyPIN)
+	if err != nil {
+		return err
 	}
 	ur, err := c.Unlock(paths.Vault, paths.UserChain, chosen.MethodType, cred)
 	if err != nil {
@@ -311,7 +254,7 @@ func RunUnlock(ctx context.Context, agentBin, method string) error {
 	return nil
 }
 
-func promptUnlockMethod(active []proto.AuthMethod, in io.Reader, out io.Writer) (proto.AuthMethod, error) {
+func promptUnlockMethod(active []proto.AuthMethod, in io.Reader, out io.Writer, defaultID string) (proto.AuthMethod, error) {
 	if len(active) == 0 {
 		return proto.AuthMethod{}, errors.New("no active auth methods")
 	}
@@ -323,21 +266,29 @@ func promptUnlockMethod(active []proto.AuthMethod, in io.Reader, out io.Writer) 
 		return ordered[0], nil
 	}
 
-	fmt.Fprintln(out, "Choose unlock method:")
+	selected := 0
+	if defaultID != "" {
+		for i, method := range ordered {
+			if method.MethodID == defaultID {
+				selected = i
+			}
+		}
+	}
+	fmt.Fprintln(out, "Choose authentication method:")
 	for i, method := range ordered {
 		fmt.Fprintf(out, "  %d) %s\n", i+1, unlockMethodLabel(method))
 	}
 
 	reader := bufio.NewReader(in)
 	for {
-		fmt.Fprint(out, "Select [1]: ")
+		fmt.Fprintf(out, "Select [%d]: ", selected+1)
 		line, readErr := reader.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if line == "" {
 			if readErr != nil {
 				return proto.AuthMethod{}, fmt.Errorf("choose unlock method: %w", readErr)
 			}
-			return ordered[0], nil
+			return ordered[selected], nil
 		}
 		selection, parseErr := strconv.Atoi(line)
 		if parseErr == nil && selection >= 1 && selection <= len(ordered) {
