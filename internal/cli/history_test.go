@@ -22,6 +22,11 @@ import (
 // flock, the on-disk chain) is the production code path — only HOME moves.
 // The production ~/.fd0 is never involved.
 func newTestVault(t *testing.T) (context.Context, string) {
+	ctx, scope, _ := newTestVaultWithAgent(t)
+	return ctx, scope
+}
+
+func newTestVaultWithAgent(t *testing.T) (context.Context, string, *agent.Server) {
 	t.Helper()
 	home := shortTempDir(t)
 	t.Setenv("FD0_HOME", home)
@@ -69,7 +74,7 @@ func newTestVault(t *testing.T) (context.Context, string) {
 	if scopeID == "" {
 		t.Fatal("no scope was created")
 	}
-	return ctx, scopeID
+	return ctx, scopeID, server
 }
 
 // shortTempDir is t.TempDir() with TMPDIR pinned to /tmp when available. The

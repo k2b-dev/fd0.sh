@@ -25,6 +25,7 @@ import { useVault } from "../lib/store";
 import { ItemTagEditor } from "./ItemTagEditor";
 import { Button, IconButton } from "../ui/Button";
 import { MenuButton, type MenuSection } from "../ui/Menu";
+import { SSHGrantPanel } from "./SSHGrantPanel";
 import { ItemHistory } from "./ItemHistory";
 
 const REVEAL_SECONDS = 15;
@@ -391,6 +392,9 @@ function DetailContent(props: {
 
       <div classList={{ "detail-body": true, "is-loading": vault.detailLoading() }}>
         <div class="detail-column">
+ <Show when={item().badge === "SSH HOST" && !props.raw && vault.status()?.sshGrantsSupported}>
+ <SSHGrantPanel item={{scopeId:item().scopeId,name:item().recordName}} />
+ </Show>
           <For each={sections()}>
             {([section, fields]) => (
               <section class="field-section">

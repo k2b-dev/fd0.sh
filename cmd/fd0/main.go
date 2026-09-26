@@ -183,6 +183,9 @@ type keyMoveCmd struct {
 
 // ───── ssh ────────────────────────────────────────────────────────────
 type sshCmd struct {
+	Grant   sshGrantCmd   `cmd:"" help:"Authorize one host for SSH while locked; requires fresh authentication in your terminal."`
+	Grants  sshGrantsCmd  `cmd:"" help:"List this device's saved/active SSH grants."`
+	Revoke  sshRevokeCmd  `cmd:"" help:"Remove a saved SSH grant (requires an unlocked vault)."`
 	Enable  sshEnableCmd  `cmd:"" help:"One-time setup: writes Include line + creates fd0.conf."`
 	Disable sshDisableCmd `cmd:"" help:"Reverse the one-time setup."`
 	Sock    sshSockCmd    `cmd:"" help:"Print the agent socket path."`
@@ -198,6 +201,19 @@ type sshCmd struct {
 	History itemHistoryCmd `cmd:"" help:"Show or restore earlier versions of a host."`
 
 	Connect sshConnectCmd `cmd:"" default:"withargs" help:"Connect to a host, or open the picker."`
+}
+
+type sshGrantCmd struct {
+	Alias      string `arg:""`
+	Scope      string `name:"scope" help:"Scope label or id."`
+	Method     string `name:"method" help:"Authentication method type or id."`
+	KnownHosts string `name:"known-hosts" help:"Trusted known_hosts file (default ~/.ssh/known_hosts)."`
+}
+type sshGrantsCmd struct {
+	JSON bool `name:"json"`
+}
+type sshRevokeCmd struct {
+	ID string `arg:""`
 }
 
 type sshEditCmd struct {
@@ -735,7 +751,9 @@ type unlockCmd struct {
 	AgentBin string `name:"agent-bin" help:"Path to fd0-agent binary." env:"FD0_AGENT_BIN"`
 	Method   string `name:"method" help:"Auth method type or method_id to use ('passphrase', 'yubikey', or am_...). Overrides [auth].default_method."`
 }
-type lockCmd struct{}
+type lockCmd struct {
+	All bool `name:"all" help:"Also stop active SSH grants until the next unlock."`
+}
 type statusCmd struct{}
 type agentCmd struct {
 	Status  agentStatusCmd  `cmd:"" help:"Show fd0-agent process, vault, and SSH socket state."`
@@ -958,6 +976,11 @@ func maybeAutoUnlock(kctx *kong.Context, c *rootCLI) error {
 		if err == nil && st.Unlocked {
 			return nil
 		}
+		if err == nil && !st.Unlocked && st.SSHGrantCount > 0 {
+			if result, err := ac.SSHGrant(agent.SSHGrantReq{Action: "list"}); err == nil && commandHasSSHGrant(kctx.Command(), c, result.Grants) {
+				return nil
+			}
+		}
 	}
 	return cli.RunUnlock(context.Background(), c.Unlock.AgentBin, "")
 }
@@ -1011,6 +1034,7 @@ func commandNeedsUnlockedVault(command string) bool {
 		"ssh edit <alias>",
 		"ssh rename <alias> <new-alias>",
 		"ssh move <alias>",
+		"ssh revoke <id>",
 		"key history <name>", "key history show <name>",
 		"key history restore <name> <seq>",
 		"ssh history <name>", "ssh history show <name>",
@@ -1127,6 +1151,9 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 	case "unlock":
 		return cli.RunUnlock(ctx, c.Unlock.AgentBin, c.Unlock.Method)
 	case "lock":
+		if c.Lock.All {
+			return cli.RunLockAll(ctx)
+		}
 		return cli.RunLock(ctx)
 	case "agent status":
 		return cli.RunAgentStatus(ctx)
@@ -1265,6 +1292,12 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		return cli.RunKeyMove(ctx, c.Key.Move.Name, c.Key.Move.From, c.Key.Move.ToScope, c.Key.Move.Force)
 
 	// ─── ssh ──────────────────────────────────────────────────────────
+	case "ssh grant <alias>":
+		return cli.RunSSHGrant(ctx, c.Ssh.Grant.Scope, c.Ssh.Grant.Alias, c.Ssh.Grant.Method, c.Ssh.Grant.KnownHosts)
+	case "ssh grants":
+		return cli.RunSSHGrants(ctx, c.Ssh.Grants.JSON)
+	case "ssh revoke <id>":
+		return cli.RunSSHRevoke(ctx, c.Ssh.Revoke.ID)
 	case "ssh enable":
 		return cli.RunSSHEnable(ctx)
 	case "ssh disable":

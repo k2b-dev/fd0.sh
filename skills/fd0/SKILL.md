@@ -25,6 +25,15 @@ restricted MCP access. The organizing model must receive only those tools;
 full shell/filesystem access defeats that boundary. User approval happens in a
 separate trusted client. Do not use credential retrieval commands for cleanup.
 
+## SSH access while locked
+
+For a host that must remain accessible after locking fd0, read
+[references/ssh-grants.md](references/ssh-grants.md). Give the user the exact
+`fd0 ssh grant ALIAS --scope SCOPE` command to execute in their own terminal.
+Creating a grant requires fresh authentication even when the vault is unlocked;
+do not perform that authentication for the user. `fd0 lock --all` also stops
+active grants. Existing SSH connections remain open.
+
 ## Decision tree
 
 Map the user's intent to the right command before typing anything:

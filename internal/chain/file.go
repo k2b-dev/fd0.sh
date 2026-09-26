@@ -84,7 +84,17 @@ func ReadUserEvents(path string) ([]*proto.UserEvent, error) {
 
 // ReadScopeEvents decodes every ScopeEvent in file with tail-truncate.
 func ReadScopeEvents(path string) ([]*proto.ScopeEvent, error) {
-	raws, err := readRawEvents(path)
+	return readScopeEvents(path, true)
+}
+
+// ReadScopeEventsReadOnly rejects partial tails without repairing the file.
+// Agent-side grant activation may run without the CLI's writer lock.
+func ReadScopeEventsReadOnly(path string) ([]*proto.ScopeEvent, error) {
+	return readScopeEvents(path, false)
+}
+
+func readScopeEvents(path string, repair bool) ([]*proto.ScopeEvent, error) {
+	raws, err := readRawEventsMode(path, repair)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +113,10 @@ func ReadScopeEvents(path string) ([]*proto.ScopeEvent, error) {
 // on item boundaries via Decoder.NumBytesRead. A partial tail (decoder error
 // after at least one good event) is truncated.
 func readRawEvents(path string) ([][]byte, error) {
+	return readRawEventsMode(path, true)
+}
+
+func readRawEventsMode(path string, repair bool) ([][]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -131,7 +145,7 @@ func readRawEvents(path string) ([][]byte, error) {
 			// + tail truncated, leading callers to treat the scope as
 			// "fresh" and silently re-fetch from the server — losing local-
 			// only events that were never pushed. Require prev > 0 OR raise.
-			if errors.Is(err, io.ErrUnexpectedEOF) && prev > 0 {
+			if repair && errors.Is(err, io.ErrUnexpectedEOF) && prev > 0 {
 				if prev < len(data) {
 					if terr := os.Truncate(path, int64(prev)); terr != nil {
 						return nil, fmt.Errorf("chain: truncate partial tail: %w", terr)

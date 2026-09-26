@@ -81,6 +81,8 @@ type Server struct {
 	unlockSession string
 	lastActivity  time.Time
 	lifecycleWake chan struct{}
+	deviceID      string
+	sshGrants     []activeSSHGrant
 }
 
 // Listen creates ~/.fd0/agent.sock and accepts connections. The directory
@@ -142,7 +144,15 @@ func Listen(paths fdhome.Paths, cfg Config) (*Server, error) {
 		_ = os.Remove(paths.AgentSock)
 		return nil, fmt.Errorf("agent: write PID file %s: %w", paths.AgentPID, err)
 	}
+	deviceID, err := fdhome.EnsureDeviceID(paths.Config)
+	if err != nil {
+		l.Close()
+		os.Remove(paths.AgentSock)
+		os.Remove(paths.AgentPID)
+		return nil, err
+	}
 	s := &Server{
+		deviceID:      deviceID,
 		cfg:           cfg,
 		paths:         paths,
 		listener:      l,
@@ -176,7 +186,10 @@ func (s *Server) Close() {
 	_ = s.listener.Close()
 	_ = os.Remove(s.paths.AgentSock)
 	_ = os.Remove(s.paths.AgentPID)
-	s.lock()
+	s.mu.Lock()
+	s.lockHeld()
+	s.clearSSHGrantsHeld()
+	s.mu.Unlock()
 }
 
 // lifecycleTimer expires the unlocked state at the earliest configured
@@ -308,7 +321,7 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	requestCtx := ctx
 	cancel := func() {}
 	responseTimeout := agentRPCTimeout
-	if req.Op == OpUnlock {
+	if req.Op == OpUnlock || req.Op == OpSSHGrant {
 		requestCtx, cancel = context.WithTimeout(ctx, agentUnlockTimeout)
 		responseTimeout = agentUnlockTimeout + agentUnlockServerGrace
 	}
@@ -329,6 +342,15 @@ func (s *Server) dispatch(ctx context.Context, req *Request) (resp *Response) {
 		}
 	}()
 	switch req.Op {
+	case OpSSHGrant:
+		return s.handleSSHGrant(ctx, req.SSHGrant)
+	case OpLockAll:
+		s.mu.Lock()
+		s.lockHeld()
+		s.clearSSHGrantsHeld()
+		s.mu.Unlock()
+		s.signalLifecycle()
+		return &Response{}
 	case OpStatus:
 		return s.handleStatus()
 	case OpUnlock:
@@ -395,14 +417,16 @@ func (s *Server) handleStatus() *Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := &StatusResp{
-		Unlocked:          s.superPriv != nil,
-		Protocol:          ProtocolVersion,
-		StartedBy:         s.cfg.StartedBy,
-		Version:           s.cfg.Version,
-		Flavor:            s.cfg.Flavor,
-		YubikeyEnabled:    s.cfg.YubikeyEnabled,
-		IdleTimeoutMillis: s.cfg.IdleTimeout.Milliseconds(),
-		MaxLifetimeMillis: s.cfg.MaxLifetime.Milliseconds(),
+		Unlocked:           s.superPriv != nil,
+		SSHGrantCount:      len(s.sshGrants),
+		SSHGrantsSupported: true,
+		Protocol:           ProtocolVersion,
+		StartedBy:          s.cfg.StartedBy,
+		Version:            s.cfg.Version,
+		Flavor:             s.cfg.Flavor,
+		YubikeyEnabled:     s.cfg.YubikeyEnabled,
+		IdleTimeoutMillis:  s.cfg.IdleTimeout.Milliseconds(),
+		MaxLifetimeMillis:  s.cfg.MaxLifetime.Milliseconds(),
 	}
 	if st.Unlocked {
 		st.SinceUnix = s.unlockedAt.Unix()
@@ -419,7 +443,7 @@ func (s *Server) handleUnlock(u *UnlockReq) *Response {
 	return s.handleUnlockContext(context.Background(), u)
 }
 
-func (s *Server) handleUnlockContext(ctx context.Context, u *UnlockReq) *Response {
+func (s *Server) authenticate(ctx context.Context, u *UnlockReq, use func(*proto.VaultFile, *vault.OpenResult) *Response) *Response {
 	// Sensitive credentials decoded from the wire frame: wipe before
 	// returning, regardless of which path runs. We register the
 	// wipes BEFORE any fallible call so a vault.Read / parse / RPC
@@ -536,74 +560,83 @@ func (s *Server) handleUnlockContext(ctx context.Context, u *UnlockReq) *Respons
 		return errResp(fmt.Sprintf("vault: used auth method is not active in the canonical user chain: %v", err))
 	}
 
-	x, err := crypto.EdPrivToX25519(body.SuperPriv)
-	if err != nil {
-		crypto.Wipe(res.UnlockKey)
-		crypto.Wipe(res.PayloadKey)
-		return errResp(err.Error())
-	}
-	// Finish all fallible preparation before replacing the live session. A
-	// failed unlock response must never leave newly-installed keys behind.
-	redacted := *body
-	redacted.SuperPriv = bytes.Repeat([]byte{0}, ed25519.PrivateKeySize)
-	rb, err := proto.Marshal(redacted)
-	if err != nil {
-		crypto.Wipe(x)
-		crypto.Wipe(res.UnlockKey)
-		crypto.Wipe(res.PayloadKey)
-		crypto.Wipe(body.SuperPriv)
-		return errResp(err.Error())
-	}
-	s.mu.Lock()
-	if ctx.Err() != nil {
+	return use(v, &res)
+}
+
+func (s *Server) handleUnlockContext(ctx context.Context, u *UnlockReq) *Response {
+	return s.authenticate(ctx, u, func(v *proto.VaultFile, res *vault.OpenResult) *Response {
+		body := res.Body
+		x, err := crypto.EdPrivToX25519(body.SuperPriv)
+		if err != nil {
+			crypto.Wipe(res.UnlockKey)
+			crypto.Wipe(res.PayloadKey)
+			return errResp(err.Error())
+		}
+		// Finish all fallible preparation before replacing the live session. A
+		// failed unlock response must never leave newly-installed keys behind.
+		redacted := *body
+		redacted.SuperPriv = bytes.Repeat([]byte{0}, ed25519.PrivateKeySize)
+		rb, err := proto.Marshal(redacted)
+		if err != nil {
+			crypto.Wipe(x)
+			crypto.Wipe(res.UnlockKey)
+			crypto.Wipe(res.PayloadKey)
+			crypto.Wipe(body.SuperPriv)
+			return errResp(err.Error())
+		}
+		s.mu.Lock()
+		if ctx.Err() != nil {
+			s.mu.Unlock()
+			crypto.Wipe(x)
+			crypto.Wipe(rb)
+			return errResp(unlockTimeoutMessage)
+		}
+		if s.superPriv != nil {
+			s.superPriv.Destroy()
+		}
+		if s.x25519Priv != nil {
+			s.x25519Priv.Destroy()
+		}
+		if s.unlockKey != nil {
+			s.unlockKey.Destroy()
+		}
+		if s.payloadKey != nil {
+			s.payloadKey.Destroy()
+		}
+		s.superPriv = crypto.NewSecretCopy(body.SuperPriv)
+		s.x25519Priv = crypto.NewSecret(x)
+		s.unlockKey = crypto.NewSecret(res.UnlockKey) // takes ownership; wipes uk
+		s.payloadKey = crypto.NewSecret(res.PayloadKey)
+		s.unlockMID = res.UsedWrap.MethodID
+		s.unlockMType = res.UsedWrap.MethodType
+		s.unlockPP = append([]byte(nil), res.UsedWrap.PublicParams...)
+		s.userSuperPub = append([]byte(nil), v.UserSuperPub...)
+		now := time.Now()
+		s.unlockedAt = now
+		s.unlockSession = rand.Text()
+		s.lastActivity = now
+		// SECURITY (codex audit 🟡 server.go:305): wipe any prior
+		// redactedBody before overwriting. The "redacted" body still
+		// contains OEKs and other sensitive scope data; repeated
+		// unlocks would leave old buffers in heap memory until GC.
+		if s.redactedBody != nil {
+			crypto.Wipe(s.redactedBody)
+		}
+		s.redactedBody = rb
+		s.refreshSSHGrantsHeld(body)
 		s.mu.Unlock()
-		crypto.Wipe(x)
-		crypto.Wipe(rb)
-		return errResp(unlockTimeoutMessage)
-	}
-	if s.superPriv != nil {
-		s.superPriv.Destroy()
-	}
-	if s.x25519Priv != nil {
-		s.x25519Priv.Destroy()
-	}
-	if s.unlockKey != nil {
-		s.unlockKey.Destroy()
-	}
-	if s.payloadKey != nil {
-		s.payloadKey.Destroy()
-	}
-	s.superPriv = crypto.NewSecretCopy(body.SuperPriv)
-	s.x25519Priv = crypto.NewSecret(x)
-	s.unlockKey = crypto.NewSecret(res.UnlockKey) // takes ownership; wipes uk
-	s.payloadKey = crypto.NewSecret(res.PayloadKey)
-	s.unlockMID = res.UsedWrap.MethodID
-	s.unlockMType = res.UsedWrap.MethodType
-	s.unlockPP = append([]byte(nil), res.UsedWrap.PublicParams...)
-	s.userSuperPub = append([]byte(nil), v.UserSuperPub...)
-	now := time.Now()
-	s.unlockedAt = now
-	s.unlockSession = rand.Text()
-	s.lastActivity = now
-	// SECURITY (codex audit 🟡 server.go:305): wipe any prior
-	// redactedBody before overwriting. The "redacted" body still
-	// contains OEKs and other sensitive scope data; repeated
-	// unlocks would leave old buffers in heap memory until GC.
-	if s.redactedBody != nil {
-		crypto.Wipe(s.redactedBody)
-	}
-	s.redactedBody = rb
-	s.mu.Unlock()
-	s.signalLifecycle()
-	// Zero the original body (best-effort; CBOR decode allocated copies).
-	crypto.Wipe(body.SuperPriv)
-	if s.scheduler != nil && s.scheduler.cfg.OnUnlock {
-		go s.scheduler.TriggerSync("unlock")
-	}
-	return &Response{Unlock: &UnlockResp{
-		RedactedBody: rb,
-		UserSuperPub: append([]byte(nil), v.UserSuperPub...),
-	}}
+		s.signalLifecycle()
+		// Zero the original body (best-effort; CBOR decode allocated copies).
+		crypto.Wipe(body.SuperPriv)
+		if s.scheduler != nil && s.scheduler.cfg.OnUnlock {
+			go s.scheduler.TriggerSync("unlock")
+		}
+		return &Response{Unlock: &UnlockResp{
+			RedactedBody: rb,
+			UserSuperPub: append([]byte(nil), v.UserSuperPub...),
+		}}
+
+	})
 }
 
 func wipeOpenResult(res *vault.OpenResult) {
@@ -676,16 +709,29 @@ func (s *Server) handleReSeal(r *ReSealReq) *Response {
 		return errResp(err.Error())
 	}
 	defer crypto.Wipe(body.SuperPriv)
+	var current proto.VaultBody
+	if err := proto.Unmarshal(s.redactedBody, &current); err != nil {
+		return errResp("invalid cached vault")
+	}
+	body.SSHGrants = current.SSHGrants
+	redacted := *body
+	redacted.SuperPriv = make([]byte, ed25519.PrivateKeySize)
+	rb, err := proto.Marshal(redacted)
+	if err != nil {
+		return errResp("cannot encode vault body")
+	}
 	pk := make([]byte, 32)
 	copy(pk, s.payloadKey.Bytes())
 	defer crypto.Wipe(pk)
 	if err := vault.SaveBody(s.paths.Vault, s.userSuperPub, body, pk); err != nil {
+		crypto.Wipe(rb)
 		return errResp(err.Error())
 	}
 	if s.redactedBody != nil {
 		crypto.Wipe(s.redactedBody)
 	}
-	s.redactedBody = append([]byte(nil), r.RedactedBody...)
+	s.redactedBody = rb
+	s.refreshSSHGrantsHeld(body)
 	s.sshRevision++
 	return &Response{ReSeal: &ReSealResp{}}
 }

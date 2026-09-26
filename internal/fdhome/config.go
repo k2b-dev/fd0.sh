@@ -15,6 +15,7 @@ import (
 // Config is the user-editable ~/.fd0/config.toml. All fields are optional;
 // missing files / fields fall back to documented defaults.
 type Config struct {
+	DeviceID  string           `toml:"device_id"`
 	ShortID   string           `toml:"short_id"`
 	Sync      SyncConfig       `toml:"sync"`
 	Client    ClientConfig     `toml:"client"`

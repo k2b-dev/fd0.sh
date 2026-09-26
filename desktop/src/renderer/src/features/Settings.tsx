@@ -297,6 +297,12 @@ export function Settings(props: { onExportRecovery(): void; onShowShortcuts(): v
 
         <section class="setting-group">
           <h2 class="eyebrow">Security</h2>
+          <Show when={(vault.status()?.sshGrantCount ?? 0) > 0}>
+            <div class="setting-row">
+              <div><strong>SSH access while locked</strong><small>{vault.status()?.sshGrantCount} active grants on this device. Existing SSH connections stay open.</small></div>
+              <Button onClick={() => void vault.lock(true)}>Lock everything</Button>
+            </div>
+          </Show>
 
           <Show when={authMethods().length > 1}>
             <div class="setting-row">

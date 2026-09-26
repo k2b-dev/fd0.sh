@@ -248,6 +248,8 @@ type WrappedKeyHeader struct {
 
 // VaultBody is the plaintext that lives inside VaultFile.Body.
 type VaultBody struct {
+	// SSHGrants are personal, device-bound authorizations; never scope-shared.
+	SSHGrants        []SSHGrant                `cbor:"ssh_grants,omitempty"`
 	SuperPriv        []byte                    `cbor:"super_priv"`
 	AuthTip          ChainTip                  `cbor:"auth_tip"`
 	Scopes           map[string]ScopeVaultData `cbor:"scopes"`
@@ -465,4 +467,18 @@ type Argon2Params struct {
 	M uint32 `cbor:"m"` // memory in KiB
 	T uint32 `cbor:"t"` // iterations
 	P uint8  `cbor:"p"` // parallelism
+}
+
+// SSHGrant binds a local exception to exact host configuration and SSH keys.
+// It contains no private key material. It is owned by the agent, not ReSeal callers.
+type SSHGrant struct {
+	ID        string   `cbor:"id" json:"id"`
+	DeviceID  string   `cbor:"device_id" json:"deviceId"`
+	ScopeID   string   `cbor:"scope_id" json:"scopeId"`
+	Name      string   `cbor:"name" json:"name"`
+	HostID    string   `cbor:"host_id" json:"-"`
+	KeyID     string   `cbor:"key_id" json:"-"`
+	HostJSON  []byte   `cbor:"host_json" json:"-"`
+	KeyPublic []byte   `cbor:"key_public" json:"-"`
+	HostKeys  [][]byte `cbor:"host_keys" json:"-"`
 }

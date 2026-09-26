@@ -7,10 +7,9 @@ package agent
 // fd0 vault.
 //
 // Trust model:
-//   - Vault must be unlocked to enumerate or sign; locked vault
-//     returns the empty identity list (industry-standard "no
-//     identities" — ssh client tries the next method).
-//   - No per-sign approval prompt. Vault unlock is the consent.
+//   - Unlocked vaults expose ordinary keys. Locked vaults expose only
+//     explicitly approved, destination-constrained SSH grants (none by default).
+//   - Grants require separate fresh authentication. No per-sign prompt.
 //   - Sign + List only (Bitwarden minimalism); add/remove/lock at
 //     the protocol level are explicitly refused.
 //
@@ -59,7 +58,11 @@ func (p *liveSSHProvider) WithKeys(use func([]sshagent.KeyEntry) error) error {
 		}
 		s.mu.Lock()
 		s.expireUnlockedHeld(time.Now())
-		if s.superPriv == nil || s.unlockSession != epoch {
+		if s.superPriv == nil {
+			defer s.mu.Unlock()
+			return s.withGrantedSSHKeysHeld(use)
+		}
+		if s.unlockSession != epoch {
 			defer s.mu.Unlock()
 			return use(nil)
 		}
@@ -79,7 +82,11 @@ func (p *liveSSHProvider) WithKeys(use func([]sshagent.KeyEntry) error) error {
 		}
 		s.mu.Lock()
 		s.expireUnlockedHeld(time.Now())
-		if s.superPriv == nil || s.unlockSession != epoch {
+		if s.superPriv == nil {
+			defer s.mu.Unlock()
+			return s.withGrantedSSHKeysHeld(use)
+		}
+		if s.unlockSession != epoch {
 			defer s.mu.Unlock()
 			return use(nil)
 		}

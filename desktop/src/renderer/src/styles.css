@@ -2304,3 +2304,6 @@ button.password-tag:hover { background: var(--surface-hover); }
 
 .organization-selection { max-height: 18rem; overflow-y: auto; }
 .item-editor-fields { display: flex; flex-direction: column; gap: var(--space-4, 1rem); border: 0; padding: 0; margin: 0; min-width: 0; }
+
+/* Long key fingerprints must remain readable on narrow host detail panes. */
+.ssh-grant-panel code { overflow-wrap: anywhere; white-space: normal; }

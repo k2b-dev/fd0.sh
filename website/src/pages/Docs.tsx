@@ -957,6 +957,36 @@ $ ssh prod-db`}</Box>
     <Cmd signature="fd0 ssh show <alias>" body="Show the host record and rendered ssh_config block." />
     <Cmd signature="fd0 ssh rm <alias>" body="Remove the host entry and re-render the config." />
 
+    <H2>Keep selected hosts available while locked</H2>
+    <P>
+      In Desktop, open a host and choose <strong>Allow SSH while locked…</strong>.
+      Review its user and key fingerprints, then authenticate again. An already
+      unlocked vault does not authorize a new grant. The host needs an explicit
+      user, an fd0 key, and a server key you have already verified in
+      <Code>~/.ssh/known_hosts</Code>.
+    </P>
+    <Box>{`$ fd0 ssh grant build-server --scope work
+$ fd0 lock
+$ fd0 ssh build-server
+$ fd0 ssh grants --json
+$ fd0 lock --all
+# To remove a saved grant, unlock first:
+$ fd0 ssh revoke GRANT_ID`}</Box>
+    <P>
+      Grants are personal to this installation and remain saved across restarts.
+      Unlock once after a computer or agent restart to activate them again.
+      Ordinary locking leaves approved SSH access available; <Code>fd0 lock --all</Code>
+      also stops active grants until the next unlock. Existing connections stay open.
+      The lock screen shows active grants and offers <strong>Lock everything</strong>.
+    </P>
+    <Note>
+      Locked access requires OpenSSH session binding and host-bound authentication.
+      Forwarded agents and CA-only host trust are not supported. Each jump host
+      that needs an fd0 key requires its own grant. Changed hosts or keys need a
+      new approval; unsupported clients can use the normal unlocked workflow.
+      A coding agent should give you the grant command to run yourself.
+    </Note>
+
     <H2>Browse and transfer files</H2>
     <P>
       In fd0 Desktop, open an SSH host and choose <strong>Browse files</strong>.

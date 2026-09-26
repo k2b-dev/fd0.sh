@@ -52,8 +52,10 @@ type HandshakeResult struct {
 }
 
 type StatusResult struct {
-	VaultExists  bool `json:"vaultExists"`
-	AgentRunning bool `json:"agentRunning"`
+	SSHGrantCount      int  `json:"sshGrantCount"`
+	SSHGrantsSupported bool `json:"sshGrantsSupported"`
+	VaultExists        bool `json:"vaultExists"`
+	AgentRunning       bool `json:"agentRunning"`
 	// AgentIncompatible is set only when the running agent genuinely cannot
 	// serve this app (see inspectAgent); a different release version is not
 	// such a case. AgentIncompatibleReason is one sentence, fit to display.
@@ -283,8 +285,20 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 		}
 		defer crypto.Wipe(params.Passphrase)
 		return s.createVault(ctx, params.Passphrase, params.Label)
+	case "ssh.grant":
+		var params SSHGrantParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.sshGrant(ctx, params)
 	case "vault.lock":
-		return s.lock()
+		var params struct {
+			All bool `json:"all"`
+		}
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.lock(params.All)
 	case "agent.prepareUpdate":
 		return s.prepareUpdate()
 	case "agent.restart":
@@ -818,6 +832,8 @@ func (s *Service) status() (StatusResult, error) {
 	if err != nil {
 		return StatusResult{}, mapDomainError(err)
 	}
+	result.SSHGrantCount = status.SSHGrantCount
+	result.SSHGrantsSupported = status.SSHGrantsSupported
 	result.Unlocked = status.Unlocked
 	result.UnlockedSince = status.SinceUnix
 	result.Version = status.Version
@@ -1240,7 +1256,7 @@ func (s *Service) createVault(ctx context.Context, passphrase []byte, label stri
 	return status, nil
 }
 
-func (s *Service) lock() (StatusResult, error) {
+func (s *Service) lock(all bool) (StatusResult, error) {
 	paths, err := fdhome.Resolve()
 	if err != nil {
 		return StatusResult{}, err
@@ -1249,7 +1265,11 @@ func (s *Service) lock() (StatusResult, error) {
 	if !client.IsRunning() {
 		return s.status()
 	}
-	if err := client.Lock(); err != nil {
+	lock := client.Lock
+	if all {
+		lock = client.LockAll
+	}
+	if err := lock(); err != nil {
 		return StatusResult{}, mapDomainError(err)
 	}
 	return s.status()

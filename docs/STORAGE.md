@@ -128,9 +128,22 @@ The vault binds `auth_tip` and per-scope `chain_tip` to the chain files. Mismatc
 
 `WrappedKey.method_id` ties each unlock entry to a currently-active `AuthMethod`. Inactive wraps are pruned on every sync.
 
+The optional encrypted `ssh_grants` field stores personal SSH approvals keyed by
+installation ID. It contains host/key identities and constraints, never extra
+private key copies. It is not a scope record and is not synchronized with scope
+members. The agent preserves this field across ordinary `ReSeal` calls, including
+calls from clients that omit it. Only its dedicated grant operation can create
+or remove approvals through the supported API.
+
 ### 3.3 `config.toml`
 
-Plain TOML, no secrets. Example:
+Plain TOML, no secrets. `device_id` is a random 32-byte identifier encoded as
+64 lowercase hexadecimal characters, created once per fd0 home. CLI and Desktop
+share it. Copying the entire home copies the ID; it is not a hardware binding.
+Its initialization serializes through `config.toml.lock` and atomically replaces
+the config while preserving unrelated settings.
+
+Example:
 
 ```toml
 short_id = "jg379se4"

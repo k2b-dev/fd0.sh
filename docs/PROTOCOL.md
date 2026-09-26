@@ -387,6 +387,7 @@ WrappedKey = {
 }
 
 VaultBody (plaintext, CBOR) = {
+    ? ssh_grants : [* SSHGrant],                      ; personal installation approvals
     super_priv : bstr .size 64,
     auth_tip   : { seq: uint, hash: bstr .size 32 },
     scopes : { * tstr => {
@@ -399,6 +400,15 @@ VaultBody (plaintext, CBOR) = {
     } },
 }
 ```
+
+`SSHGrant` is an optional local extension (not a scope event). Its fields are
+`id`, `device_id`, `scope_id`, `name`, `host_id`, `key_id` (text), `host_json`
+(JSON bytes of the approved connection settings without tags/description),
+`key_public` (SSH public-key wire bytes), and `host_keys` (an array of SSH public-key
+wire bytes). It stores no private keys. Agent-owned grant operations require fresh
+credential validation and the digest of the exact reviewed grant for creation.
+Ordinary re-sealing preserves the agent's current grant list. See `STORAGE.md`
+for installation identity and `THREATS.md` for the SSH authorization boundary.
 
 `auth_tip` and per-scope `chain_tip` record the latest event the client has accepted on each chain. On open, the client compares them to the chain-file heads. Three outcomes:
 

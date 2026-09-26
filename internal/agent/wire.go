@@ -71,11 +71,14 @@ const (
 	OpEncryptSuperPriv uint8 = 9
 	OpAddWrap          uint8 = 10
 	OpRemoveWrap       uint8 = 11
+	OpSSHGrant         uint8 = 12
+	OpLockAll          uint8 = 13
 )
 
 // Request is the client→agent envelope. Exactly one of the typed fields is
 // populated, identified by Op.
 type Request struct {
+	SSHGrant         *SSHGrantReq         `cbor:"ssh_grant,omitempty"`
 	Op               uint8                `cbor:"op"`
 	Unlock           *UnlockReq           `cbor:"unlock,omitempty"`
 	Sign             *SignReq             `cbor:"sign,omitempty"`
@@ -136,6 +139,7 @@ type RecoveryExportResp struct {
 
 // Response is the agent→client envelope.
 type Response struct {
+	SSHGrant         *SSHGrantResp         `cbor:"ssh_grant,omitempty"`
 	Err              string                `cbor:"err,omitempty"`
 	Status           *StatusResp           `cbor:"status,omitempty"`
 	Unlock           *UnlockResp           `cbor:"unlock,omitempty"`
@@ -181,11 +185,13 @@ type UnlockResp struct {
 
 // StatusResp reports current state. SuperPub is empty when locked.
 type StatusResp struct {
-	UnlockSession  string `cbor:"unlock_session,omitempty"` // Changes on every unlock, including within one second.
-	Unlocked       bool   `cbor:"unlocked"`
-	SinceUnix      int64  `cbor:"since,omitempty"`
-	UserSuperPub   []byte `cbor:"user_super_pub,omitempty"`
-	ActiveMethodID string `cbor:"active_method_id,omitempty"`
+	SSHGrantCount      int    `cbor:"ssh_grant_count,omitempty"`
+	SSHGrantsSupported bool   `cbor:"ssh_grants_supported,omitempty"`
+	UnlockSession      string `cbor:"unlock_session,omitempty"` // Changes on every unlock, including within one second.
+	Unlocked           bool   `cbor:"unlocked"`
+	SinceUnix          int64  `cbor:"since,omitempty"`
+	UserSuperPub       []byte `cbor:"user_super_pub,omitempty"`
+	ActiveMethodID     string `cbor:"active_method_id,omitempty"`
 	// Protocol is ProtocolVersion; 0 means an agent that predates the field
 	// and is read as 1. Version below is informational only.
 	Protocol int `cbor:"protocol,omitempty"`

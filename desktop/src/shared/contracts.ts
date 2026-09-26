@@ -8,6 +8,8 @@ export type BridgeErrorShape = {
 };
 
 export type VaultStatus = {
+ sshGrantCount?: number;
+ sshGrantsSupported?: boolean;
   vaultExists: boolean;
   agentRunning: boolean;
   /**
@@ -505,7 +507,8 @@ export type DesktopAPI = {
   status(): Promise<VaultStatus>;
   createVault(passphrase: string, label: string): Promise<VaultStatus>;
   unlock(input: UnlockInput): Promise<VaultStatus>;
-  lock(): Promise<VaultStatus>;
+  lock(all?: boolean): Promise<VaultStatus>;
+ sshGrant(input: SSHGrantInput): Promise<SSHGrantResult>;
   restartAgent(): Promise<VaultStatus>;
   selectRecoveryFile(): Promise<{ version: 1 | 2 } | null>;
   restoreVault(recoveryPassphrase: string, newPassphrase?: string): Promise<VaultStatus | null>;
@@ -597,4 +600,15 @@ export type DesktopAPI = {
   installUpdate(): Promise<void>;
   onUpdate(handler: (status: UpdateStatus) => void): () => void;
   onCommand(handler: (command: DesktopCommand) => void): () => void;
+};
+
+export type SSHGrantView = {
+ id: string; scopeId: string; name: string; hostname: string; user: string;
+ port: number; jump?: string; fingerprint: string; hostFingerprints: string[]; active: boolean;
+};
+export type SSHGrantResult = { deviceId: string; digest?: string; grants: SSHGrantView[] };
+export type SSHGrantInput = {
+ action: "list" | "prepare" | "create" | "revoke";
+ scopeId?: string; name?: string; id?: string; digest?: string;
+ method?: string; passphrase?: string; pin?: string;
 };

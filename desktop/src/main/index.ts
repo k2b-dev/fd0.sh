@@ -86,6 +86,8 @@ import type {
   TerminalSessionInfo,
   TerminalTheme,
   UnlockInput,
+  SSHGrantInput,
+  SSHGrantResult,
   UpdateStatus,
   VaultStatus,
 } from "../shared/contracts";
@@ -1326,8 +1328,18 @@ function registerIPC(client: BridgeSupervisor): void {
     pin.fill(0);
     return observeVaultStatus(await client.request<VaultStatus>("vault.unlock", params, 60_000));
   });
-  handle("fd0:lock", async () => {
-    const status = observeVaultStatus(await client.request<VaultStatus>("vault.lock", {}));
+  handle("fd0:ssh-grant", async (input: SSHGrantInput) => {
+    if (!input || !["list", "prepare", "create", "revoke"].includes(input.action)) throw new Error("Invalid SSH grant action");
+    const passphrase = Buffer.from(input.passphrase ?? "", "utf8");
+    const pin = Buffer.from(input.pin ?? "", "utf8");
+    const params = { ...input, passphrase: passphrase.toString("base64"), pin: pin.toString("base64") };
+    passphrase.fill(0); pin.fill(0);
+    const result = await client.request<SSHGrantResult>("ssh.grant", params, 60_000);
+    if (input.action === "create" || input.action === "revoke") sendCommand("refresh");
+    return result;
+  });
+  handle("fd0:lock", async (all?: boolean) => {
+    const status = observeVaultStatus(await client.request<VaultStatus>("vault.lock", { all: all === true }));
     closeLargeTypeWindow();
     managedClipboard.clear();
     operationGrants.clear();
@@ -1810,11 +1822,18 @@ function registerIPC(client: BridgeSupervisor): void {
     return agentLifecycle.setGuiLaunchAtLogin(Boolean(value));
   });
   handle("fd0:open-ssh-host", async (ref: RecordRef) => {
-    const detail = await loadTrustedItem(client, ref);
-    if (detail.item.badge !== "SSH HOST" || !detail.item.recordName.startsWith("host:")) {
-      throw new Error("Only fd0 SSH hosts can be opened in a terminal");
+    let alias: string;
+    const status = await client.request<VaultStatus>("vault.status", {});
+    if (status.unlocked) {
+      const detail = await loadTrustedItem(client, ref);
+      if (detail.item.badge !== "SSH HOST" || !detail.item.recordName.startsWith("host:")) throw new Error("Only fd0 SSH hosts can be opened in a terminal");
+      alias = detail.item.recordName.slice("host:".length);
+    } else {
+      const result = await client.request<SSHGrantResult>("ssh.grant", { action: "list" });
+      const grant = result.grants.find((g) => g.active && g.scopeId === ref.scopeId && `host:${g.name}` === ref.name);
+      if (!grant) throw new Error("Unlock fd0 or select a host with an active SSH grant");
+      alias = grant.name;
     }
-    const alias = detail.item.recordName.slice("host:".length);
     const environment = runtimeEnvironment();
     const settings = await readTerminalLauncherSettings(
       terminalLauncherSettingsPath(),
@@ -1823,7 +1842,7 @@ function registerIPC(client: BridgeSupervisor): void {
     if (settings.profileId === "in-app") {
       openTerminalWindow({
         host: alias,
-        scopeId: detail.item.scopeId,
+        scopeId: ref.scopeId,
         fd0Binary: environment.FD0_BIN ?? "",
         environment,
         cwd: environment.HOME ?? homedir(),
@@ -1840,7 +1859,7 @@ function registerIPC(client: BridgeSupervisor): void {
       settings,
       detection,
       fd0Binary: environment.FD0_BIN ?? "",
-      scopeId: detail.item.scopeId,
+      scopeId: ref.scopeId,
       alias,
       environment,
     });

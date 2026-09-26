@@ -553,6 +553,9 @@ func RunLock(ctx context.Context) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "✓ vault locked")
+	if st, err := cli.Status(); err == nil && st.SSHGrantCount > 0 {
+		fmt.Fprintf(os.Stderr, "%d SSH grants remain active; use fd0 lock --all to stop them.\n", st.SSHGrantCount)
+	}
 	return nil
 }
 
@@ -570,6 +573,9 @@ func RunStatus(ctx context.Context) error {
 	st, err := cli.Status()
 	if err != nil {
 		return err
+	}
+	if st.SSHGrantCount > 0 {
+		fmt.Printf("SSH grants: %d active (fd0 lock --all stops them)\n", st.SSHGrantCount)
 	}
 	if !st.Unlocked {
 		fmt.Println("agent: running, locked")

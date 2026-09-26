@@ -11,10 +11,11 @@
 //     desktop ssh-agent posture and removes whole categories of misuse
 //     (cf. SSH agent protocol §2.5 — implementations MAY decline ops).
 //
-//   - Vault-unlock is the consent boundary. No per-sign approval
+//   - Vault-unlock is the default consent boundary. No per-sign approval
 //     prompt. The standard ssh-agent (OpenSSH, gpg-agent, gnome-
 //     keyring) behaviour. If the vault is locked the key listing is
-//     empty and sign returns failure; the user runs `fd0 unlock` and
+//     empty unless destination-constrained grants were explicitly authorized.
+//     Otherwise sign returns failure; the user runs `fd0 unlock` and
 //     retries, the SSH client picks the key up automatically.
 //
 //   - The KeyProvider is injected. This file does not know about the
@@ -34,6 +35,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/valentinkolb/fd0.sh/internal/sshkey"
 	"golang.org/x/crypto/ssh"
@@ -43,13 +45,15 @@ import (
 // KeyEntry is what the agent serves to ssh clients. The Key carries
 // the signing material; Comment is what ssh-add -l displays.
 type KeyEntry struct {
-	Key     *sshkey.Key
-	Comment string // free-form; falls back to key.Comment if empty
+	Destinations []Destination
+	Key          *sshkey.Key
+	Comment      string // free-form; falls back to key.Comment if empty
 }
 
 // KeyProvider lends keys only for the duration of an operation. Implementations
 // must coordinate the callback with vault lock and expiry and must be safe for
-// concurrent calls. A locked vault calls use with an empty slice; fetch failures
+// concurrent calls. A locked vault supplies only explicitly constrained grants
+// or an empty slice; fetch failures
 // return an error. Callers must never retain private key material.
 type KeyProvider interface {
 	WithKeys(use func([]KeyEntry) error) error
@@ -60,7 +64,10 @@ type KeyProvider interface {
 // return an error so adversarial clients (and confused tooling) fail
 // loudly rather than silently mutating state.
 type fd0Agent struct {
-	src KeyProvider
+	src              KeyProvider
+	mu               sync.Mutex
+	binding          *sessionBinding
+	bindingAttempted bool
 }
 
 // New wraps a KeyProvider in an agent.Agent suitable for
@@ -102,6 +109,8 @@ func (a *fd0Agent) List() ([]*agent.Key, error) {
 // imported RSA keys deliberately decline RFC 8332 newer SHA modes —
 // callers should rotate to ed25519 instead.
 func (a *fd0Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	var signature *ssh.Signature
 	err := a.src.WithKeys(func(entries []KeyEntry) error {
 		target := key.Marshal()
@@ -111,6 +120,9 @@ func (a *fd0Agent) Sign(key ssh.PublicKey, data []byte) (*ssh.Signature, error) 
 				return errors.New("sshagent: invalid public key")
 			}
 			if !equalBytes(pub.Marshal(), target) {
+				continue
+			}
+			if !a.allows(e.Destinations, key, data) {
 				continue
 			}
 			signer, err := e.Key.Signer()

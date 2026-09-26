@@ -335,11 +335,11 @@ export function createVaultStore() {
     });
   }
 
-  async function lock(): Promise<void> {
+  async function lock(all = false): Promise<void> {
     try {
-      await window.fd0.lock();
+      const next = await window.fd0.lock(all);
       batch(() => {
-        setStatus((current) => (current ? { ...current, unlocked: false } : current));
+        setStatus((current) => next ?? (current ? { ...current, unlocked: false } : current));
         setInventory(emptyInventory);
         setDetail(null);
         setSelectedID("");

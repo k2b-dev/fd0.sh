@@ -795,3 +795,37 @@ extend §3 + §4 here, then go annotate the corresponding code site.
 A future spec-compliance generator could parse this doc and fail CI
 when a Tnn entry has no matching `// THREAT:` annotation in non-test
 code.
+
+
+## SSH grants while the vault is locked
+
+SSH grants are an explicit exception to the default empty SSH identity list while
+locked. Saved approvals live in the encrypted local vault and apply to one
+installation ID. After restart, the first unlock resolves their current host and
+key records. Only the selected private SSH keys survive subsequent vault locks,
+in protected memory; identity, payload and scope keys follow the normal lock
+lifecycle. `fd0 lock --all` clears active SSH keys too. Existing SSH sessions and
+multiplexed connections are outside the agent's authentication boundary.
+
+The supported grant operation always validates freshly supplied credentials
+against the canonical vault and active authentication methods. It binds the
+approval to a digest of the device, record identities, connection settings,
+client public key and already-trusted server host keys. Generic vault re-sealing
+cannot modify approvals. This is a workflow boundary, not a defense against
+arbitrary same-UID code: existing recovery/export and identity APIs retain their
+normal trust model. A terminal or passphrase prompt alone does not prove human
+presence. YubiKey touch requirements depend on enrollment policy.
+
+Locked signing requires a verified `session-bind@openssh.com` proof and a matching
+`publickey-hostbound-v00@openssh.com` user-authentication payload, including the
+session ID, destination host key, username and client key. Unbound or forwarded
+connections, arbitrary signing and unsupported clients are refused. Hosts that
+share a server host key share that cryptographic identity; hostname and port are
+configuration checks, not independent server identities. CA-only trust is not
+accepted. ProxyJump hops require separate explicit approvals.
+
+Grant activation reads scope chains without repairing partial tails. Vault
+commits revalidate grants, so changed targets, replaced/deleted keys and observed
+membership removal stop affected grants. Offline agents cannot observe remote
+revocation until synchronization. Local grant revocation does not remove a
+public key from a remote server's authorized_keys file.

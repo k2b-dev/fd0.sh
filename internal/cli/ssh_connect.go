@@ -53,6 +53,9 @@ func PrepareOpenSSHConnection(ctx context.Context, scopeID, name string) (OpenSS
 		return OpenSSHConnection{}, errors.New("host alias is required")
 	}
 	s, err := Open(ctx)
+	if errors.Is(err, ErrAgentLocked) {
+		return prepareGrantedSSHConnection(scopeID, name)
+	}
 	if err != nil {
 		return OpenSSHConnection{}, err
 	}
@@ -106,6 +109,16 @@ func PrepareOpenSSHConnection(ctx context.Context, scopeID, name string) (OpenSS
 // (e.g. `fd0 ssh prod-db "uname -a"`).
 func RunSSHConnect(ctx context.Context, scopeID, name string, extra []string, anyTags []string) error {
 	s, err := Open(ctx)
+	if errors.Is(err, ErrAgentLocked) {
+		if len(anyTags) > 0 {
+			return errors.New("unlock to filter hosts by tags")
+		}
+		conn, e := prepareGrantedSSHConnection(scopeID, name)
+		if e != nil {
+			return e
+		}
+		return execSSH(conn.Alias, extra, conn.ConfigPath)
+	}
 	if err != nil {
 		return err
 	}

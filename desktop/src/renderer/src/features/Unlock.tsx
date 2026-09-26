@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onMount, type JSX } 
 import { IconDeviceUsb, IconKey, IconLock } from "@tabler/icons-solidjs";
 import type { VaultStatus } from "../../../shared/contracts";
 import { toAppError, type AppError } from "../lib/errors";
+import { ActiveSSHGrants } from "./SSHGrantPanel";
 import { Button } from "../ui/Button";
 import { Field, Input, SecretInput } from "../ui/Fields";
 
@@ -90,6 +91,7 @@ export function Unlock(props: {
           </div>
           <h1>Unlock fd0</h1>
           <p>Your vault stays encrypted until you unlock it on this device.</p>
+          <ActiveSSHGrants status={props.status} onStatus={props.onUnlock} />
           <form class="auth-form" onSubmit={(event) => void unlock(event)}>
             <Show when={methods().length > 1}>
               <div class="unlock-methods" role="radiogroup" aria-label="Unlock method">
