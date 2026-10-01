@@ -654,6 +654,7 @@ type talosSecretsCmd struct {
 	Export talosSecretsExportCmd `cmd:"" help:"Write a stored secrets.yaml bundle to a file (DR-grade)."`
 	Import talosSecretsImportCmd `cmd:"" help:"Read a secrets.yaml from disk into the vault."`
 	List   talosSecretsListCmd   `cmd:"" aliases:"ls" help:"List stored bundles."`
+	Rm     talosSecretsRmCmd     `cmd:"" aliases:"remove" help:"Remove a stored bundle (tombstone; history keeps it)."`
 }
 type talosSecretsExportCmd struct {
 	Name  string `arg:"" help:"Bundle name (matches the cluster name passed to 'fd0 talos new')."`
@@ -665,6 +666,12 @@ type talosSecretsImportCmd struct {
 	Name  string `arg:"" help:"Bundle name."`
 	In    string `name:"in" required:"" help:"Path to the secrets.yaml file."`
 	Scope string `name:"scope" help:"Scope."`
+	Force bool   `name:"force" help:"Replace an existing bundle with the same name."`
+}
+type talosSecretsRmCmd struct {
+	Name  string `arg:"" help:"Bundle name."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	Yes   bool   `name:"yes" short:"y" help:"Skip the confirmation prompt."`
 }
 type talosSecretsListCmd struct {
 	Scope string `name:"scope" help:"Scope."`
@@ -1093,6 +1100,7 @@ func commandNeedsUnlockedVault(command string) bool {
 		"talos kubeconfig <name>",
 		"talos secrets export <name>",
 		"talos secrets import <name>",
+		"talos secrets rm <name>",
 		"talos secrets list", "talos secrets ls",
 		"kube enable",
 		"kube add", "kube add <name>",
@@ -1599,7 +1607,10 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		return cli.RunTalosSecretsImport(ctx,
 			c.Talos.Secrets.Import.Scope,
 			c.Talos.Secrets.Import.Name,
-			c.Talos.Secrets.Import.In)
+			c.Talos.Secrets.Import.In,
+			c.Talos.Secrets.Import.Force)
+	case "talos secrets rm <name>":
+		return cli.RunTalosSecretsRemove(ctx, c.Talos.Secrets.Rm.Scope, c.Talos.Secrets.Rm.Name, c.Talos.Secrets.Rm.Yes)
 	case "talos secrets list", "talos secrets ls":
 		return cli.RunTalosSecretsList(ctx, c.Talos.Secrets.List.Scope)
 

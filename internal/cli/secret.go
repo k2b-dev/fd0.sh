@@ -421,6 +421,12 @@ func RunSecretRemove(ctx context.Context, scopeID, name string, yes bool) error 
 	if err := guardPlainSecret("rm", name); err != nil {
 		return err
 	}
+	return removeRecord(ctx, scopeID, name, name, "secret", yes)
+}
+
+// removeRecord tombstones the record stored under name; label and noun only
+// shape the messages.
+func removeRecord(ctx context.Context, scopeID, name, label, noun string, yes bool) error {
 	s, err := Open(ctx)
 	if err != nil {
 		return err
@@ -446,9 +452,9 @@ func RunSecretRemove(ctx context.Context, scopeID, name string, yes bool) error 
 		}
 	}
 	if sid == "" {
-		return fmt.Errorf("secret %q not found in scope %s", name, scopeName(s, scopeID))
+		return fmt.Errorf("%s %q not found in scope %s", noun, label, scopeName(s, scopeID))
 	}
-	if err := confirmDanger(yes, fmt.Sprintf("Remove secret %q from %s?", name, scopeName(s, scopeID))); err != nil {
+	if err := confirmDanger(yes, fmt.Sprintf("Remove %s %q from %s?", noun, label, scopeName(s, scopeID))); err != nil {
 		return err
 	}
 	sd := s.Body.Scopes[scopeID]
@@ -475,7 +481,7 @@ func RunSecretRemove(ctx context.Context, scopeID, name string, yes bool) error 
 	if err := s.ReSeal(); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "✓ %s removed from %s\n", name, scopeName(s, scopeID))
+	fmt.Fprintf(os.Stderr, "✓ %s removed from %s\n", label, scopeName(s, scopeID))
 	hintSyncForPeers()
 	return nil
 }

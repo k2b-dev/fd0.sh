@@ -102,7 +102,7 @@ func RunTalosSecretsExport(ctx context.Context, scopeFlag, name, outPath string,
 // RunTalosSecretsImport stuffs an existing secrets.yaml into the
 // vault. Useful for "I had a cluster before fd0; let me get the DR
 // bundle into the vault too".
-func RunTalosSecretsImport(ctx context.Context, scopeFlag, name, inPath string) error {
+func RunTalosSecretsImport(ctx context.Context, scopeFlag, name, inPath string, force bool) error {
 	if inPath == "" {
 		return errors.New("talos secrets import: --in required")
 	}
@@ -119,6 +119,11 @@ func RunTalosSecretsImport(ctx context.Context, scopeFlag, name, inPath string) 
 	if err != nil {
 		return err
 	}
+	if !force {
+		if _, err := s.GetTypedSecret(scope, talosSecretsNamePrefix+name); err == nil {
+			return fmt.Errorf("talos secrets import: bundle %q already exists in scope %s (pass --force to replace it; the old bundle stays in history)", name, scopeName(s, scope))
+		}
+	}
 	if err := storeTalosSecrets(ctx, s, scope, name, raw); err != nil {
 		return err
 	}
@@ -126,6 +131,12 @@ func RunTalosSecretsImport(ctx context.Context, scopeFlag, name, inPath string) 
 		len(raw), name, scopeName(s, scope))
 	hintSyncForPeers()
 	return nil
+}
+
+// RunTalosSecretsRemove tombstones a stored bundle, e.g. for a retired
+// cluster. Earlier versions stay in the item history.
+func RunTalosSecretsRemove(ctx context.Context, scopeFlag, name string, yes bool) error {
+	return removeRecord(ctx, scopeFlag, talosSecretsNamePrefix+name, name, "Talos secrets bundle", yes)
 }
 
 // RunTalosSecretsList lists secrets.yaml bundles (just the names).

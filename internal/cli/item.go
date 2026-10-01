@@ -37,6 +37,11 @@ var (
 	KindTalos  = ItemKind{Noun: "context", Command: "talos", Prefix: talosNamePrefix}
 )
 
+// KindTalosSecrets owns DR-grade secrets.yaml bundles. It only guards the
+// name space; bundles are managed by `fd0 talos secrets`, not by the shared
+// item behaviours below.
+var KindTalosSecrets = ItemKind{Noun: "Talos secrets bundle", Command: "talos secrets", Prefix: talosSecretsNamePrefix}
+
 // itemKinds is the registry every shared behaviour reads, so adding a module
 // means adding it here rather than remembering a second list.
 var itemKinds = []ItemKind{KindSecret, KindPass, KindHost, KindKey, KindKube, KindTalos}
@@ -399,7 +404,7 @@ func RunItemRestore(ctx context.Context, kind ItemKind, scopeID, name string, se
 // module's records too — `fd0 secret rm host:prod` would delete an SSH host
 // while claiming to remove a secret.
 func kindOwning(name string) (ItemKind, bool) {
-	for _, kind := range itemKinds {
+	for _, kind := range append(itemKinds, KindTalosSecrets) {
 		if kind.Prefix != "" && strings.HasPrefix(name, kind.Prefix) {
 			return kind, true
 		}
@@ -430,6 +435,9 @@ func guardPlainSecret(verb, name string) error {
 // the spellings that actually differ need translating.
 func secretVerbFor(kind ItemKind, verb string) string {
 	if verb == "get" {
+		if kind == KindTalosSecrets {
+			return "export --out FILE"
+		}
 		// Modules render a whole item; there is no single value to print.
 		return "show"
 	}

@@ -96,7 +96,7 @@ Map the user's intent to the right command before typing anything:
 | Bootstrap a new Talos cluster (day-0) | `fd0 talos new NAME --endpoint https://IP:6443 [--vault-scope LABEL]` (needs `talosctl`) |
 | Render + merge talosconfig | `fd0 talos sync --merge` |
 | Onboard a teammate to a Talos cluster | `fd0 talos role-add --from CTX --name NAME --role os:operator` (needs `talosctl`) |
-| Store / export the DR secrets.yaml | `fd0 talos secrets import\|export NAME --in\|--out FILE` |
+| Store / export / retire the DR secrets.yaml | `fd0 talos secrets import\|export NAME --in\|--out FILE` (`--force` to replace); `fd0 talos secrets rm NAME` |
 | Store a kubeconfig | `fd0 kube add NAME --from-config ~/.kube/config` (or per-field `--server/--ca-file/...`) |
 | Fetch a fresh kubeconfig from Talos | `fd0 talos kubeconfig CTX` (needs `talosctl`) |
 | Render + merge kubeconfig | `fd0 kube sync --merge` |
