@@ -47,8 +47,16 @@ verify_production_unchanged() {
         || { printf 'integration isolation: production fd0 state changed\n' >&2; return 1; }
 }
 
+# Scripts start agents and servers from this run's binaries; some leave them
+# running. Stop every process whose executable lives under RUN_ROOT and only
+# those, so nothing outside the test run is touched.
+stop_run_processes() {
+    pkill -f "^$RUN_ROOT/" 2>/dev/null || true
+}
+
 cleanup() {
     local code=$?
+    stop_run_processes
     verify_production_unchanged || code=1
     if [ "$code" -eq 0 ]; then
         rm -rf "$RUN_ROOT"
@@ -133,5 +141,7 @@ for script in "$@"; do
         FD0_MITM="$test_bin/fd0-test-mitm" \
         FD0_BAD_WITNESS="$test_bin/fd0-test-bad-witness" \
         PATH="$test_bin:$PATH" \
-        bash "$script"
+        bash "$script" || script_status=$?
+    stop_run_processes
+    [ "${script_status:-0}" -eq 0 ] || exit "$script_status"
 done
