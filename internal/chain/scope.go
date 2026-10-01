@@ -448,6 +448,13 @@ func applyMemberChange(st *ScopeState, ev *proto.ScopeEvent, ownSuperPub, oekPla
 	// projection, and the projection must not inject unknown ids.
 	// Skipped only for our own admit event, where no prior local state exists.
 	weAreNewMember := bytes.Equal(pl.Member, ownSuperPub) && pl.Op == proto.OpAdd
+	seenIDs := make(map[string]bool, len(proj.Secrets))
+	for _, sec := range proj.Secrets {
+		if seenIDs[sec.ID] {
+			return false, fmt.Errorf("projection repeats id %s", sec.ID)
+		}
+		seenIDs[sec.ID] = true
+	}
 	if !weAreNewMember {
 		projIDs := map[string]*proto.SecretRecord{}
 		for _, sec := range proj.Secrets {
@@ -471,8 +478,15 @@ func applyMemberChange(st *ScopeState, ev *proto.ScopeEvent, ownSuperPub, oekPla
 			if rec == nil {
 				continue
 			}
-			if _, known := st.SecretIndex[id]; !known {
+			cur, known := st.SecretIndex[id]
+			if !known {
 				return false, fmt.Errorf("projection injects unknown id %s", id)
+			}
+			// A live record under an id that is tombstoned locally would
+			// let the author of a membership change resurrect arbitrary
+			// content without a secret.set.
+			if cur.Record == nil {
+				return false, fmt.Errorf("projection resurrects deleted id %s", id)
 			}
 		}
 	}

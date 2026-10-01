@@ -238,3 +238,87 @@ func TestMalMemberCannotReplayOldSecretSet(t *testing.T) {
 }
 
 var _ = bytes.Equal
+
+// TestMalMemberCannotResurrectTombstoneViaProjection: a member.change
+// projection must not bring back content under an id that was deleted.
+func TestMalMemberCannotResurrectTombstoneViaProjection(t *testing.T) {
+	path, ownerPub, ownerPriv, otherPub, otherPriv, ownerXPub, ownerXPriv, scopeID := setupTwoMember(t)
+	open := LocalOpener{Pub: ownerXPub, Priv: ownerXPriv}
+	ownerTyped, _ := crypto.ParseEd25519Priv(ownerPriv)
+	owner := LocalSigner{Priv: ownerTyped}
+	st, err := ReplayScope(path, ownerPub, ownerXPub, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "s_deleted_target_aa"
+	for _, rec := range []*proto.SecretRecord{
+		{Name: "x", Type: "kv.string", SchemaVersion: 1, Payload: "original", Tags: map[string]string{}},
+		nil,
+	} {
+		ev, err := BuildSecretSet(owner, ownerPub, scopeID, st.TipSeq, st.TipHash, st.OEKs[st.CurrentOEKVer], st.CurrentOEKVer, &proto.SecretBody{ID: id, Record: rec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendScope(path, ev); err != nil {
+			t.Fatal(err)
+		}
+		if st, err = ReplayScope(path, ownerPub, ownerXPub, open); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cur, ok := st.SecretIndex[id]; !ok || cur.Record != nil {
+		t.Fatal("setup: id is not a local tombstone")
+	}
+	proj := buildProjection(st)
+	proj.Secrets = append(proj.Secrets, proto.SecretInProjection{ID: id, Record: &proto.SecretRecord{Name: "x", Type: "kv.string", SchemaVersion: 1, Payload: "resurrected", Tags: map[string]string{}}})
+	otherTyped, _ := crypto.ParseEd25519Priv(otherPriv)
+	thirdPub, _, _ := crypto.GenerateIdentity()
+	ev, _, err := BuildMemberChange(LocalSigner{Priv: otherTyped}, otherPub, scopeID, st.TipSeq, st.TipHash, st.CurrentOEKVer, proto.OpAdd, thirdPub.Bytes(), st.MemberSet, proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendScope(path, ev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReplayScope(path, ownerPub, ownerXPub, open); err == nil {
+		t.Fatal("replay accepted a projection that resurrects a deleted id")
+	}
+}
+
+// TestMalMemberCannotRepeatIDsInProjection: duplicate ids must not let the
+// last copy silently replace the verified one.
+func TestMalMemberCannotRepeatIDsInProjection(t *testing.T) {
+	path, ownerPub, ownerPriv, otherPub, otherPriv, ownerXPub, ownerXPriv, scopeID := setupTwoMember(t)
+	open := LocalOpener{Pub: ownerXPub, Priv: ownerXPriv}
+	ownerTyped, _ := crypto.ParseEd25519Priv(ownerPriv)
+	st, err := ReplayScope(path, ownerPub, ownerXPub, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := BuildSecretSet(LocalSigner{Priv: ownerTyped}, ownerPub, scopeID, st.TipSeq, st.TipHash, st.OEKs[st.CurrentOEKVer], st.CurrentOEKVer,
+		&proto.SecretBody{ID: "s_duplicate_target", Record: &proto.SecretRecord{Name: "x", Type: "kv.string", SchemaVersion: 1, Payload: "original", Tags: map[string]string{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendScope(path, ev); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = ReplayScope(path, ownerPub, ownerXPub, open); err != nil {
+		t.Fatal(err)
+	}
+	proj := buildProjection(st)
+	proj.Secrets = append(proj.Secrets, proto.SecretInProjection{ID: "s_duplicate_target", Record: &proto.SecretRecord{Name: "x", Type: "kv.string", SchemaVersion: 1, Payload: "replaced", Tags: map[string]string{}}})
+	otherTyped, _ := crypto.ParseEd25519Priv(otherPriv)
+	thirdPub, _, _ := crypto.GenerateIdentity()
+	change, _, err := BuildMemberChange(LocalSigner{Priv: otherTyped}, otherPub, scopeID, st.TipSeq, st.TipHash, st.CurrentOEKVer, proto.OpAdd, thirdPub.Bytes(), st.MemberSet, proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendScope(path, change); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReplayScope(path, ownerPub, ownerXPub, open); err == nil {
+		t.Fatal("replay accepted a projection with a repeated id")
+	}
+}
+
