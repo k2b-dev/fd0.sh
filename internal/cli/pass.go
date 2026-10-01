@@ -408,6 +408,20 @@ func RunPassSectionAdd(ctx context.Context, scopeID, itemName, path string) erro
 }
 
 func RunPassFieldSet(ctx context.Context, o PassFieldSetOpts) error {
+	// Read stdin before taking the vault lock: in `fd0 … | fd0 pass field
+	// set … -` the producer needs the same lock, and an empty read must
+	// never overwrite a stored value.
+	value := o.Value
+	if value == "-" && !o.Generate {
+		var err error
+		value, err = readStdinTrimOneNewline("pass field set")
+		if err != nil {
+			return err
+		}
+		if value == "" {
+			return errors.New("pass field set: stdin was empty; nothing was changed")
+		}
+	}
 	s, rec, item, err := openPassItem(ctx, o.Scope, o.Item)
 	if err != nil {
 		return err
@@ -416,6 +430,14 @@ func RunPassFieldSet(ctx context.Context, o PassFieldSetOpts) error {
 	kind := o.Kind
 	if o.Secret {
 		kind = passitem.FieldSecret
+	}
+	var existing string
+	if f, err := item.Field(o.Path); err == nil {
+		existing = f.Type
+	}
+	if kind == "" && !o.Generate && (existing == passitem.FieldText || existing == passitem.FieldSecret) {
+		// Updating a value keeps its type; a rotated secret stays masked.
+		kind = existing
 	}
 	if kind == "" {
 		kind = passitem.FieldText
@@ -426,7 +448,6 @@ func RunPassFieldSet(ctx context.Context, o PassFieldSetOpts) error {
 	var field passitem.Field
 	switch kind {
 	case passitem.FieldText, passitem.FieldSecret:
-		value := o.Value
 		if o.Generate {
 			if kind != passitem.FieldSecret {
 				return errors.New("--generate requires --type secret or --secret")
@@ -435,13 +456,11 @@ func RunPassFieldSet(ctx context.Context, o PassFieldSetOpts) error {
 			if err != nil {
 				return err
 			}
-		} else if value == "-" {
-			value, err = readStdinTrimOneNewline("pass field set")
-			if err != nil {
-				return err
-			}
 		} else if value == "" {
 			return errors.New("VALUE required (or use --generate / - for stdin)")
+		}
+		if existing == passitem.FieldSecret && kind == passitem.FieldText {
+			stderrln("⚠ field %q changes from secret to text and will no longer be masked", o.Path)
 		}
 		field, err = passitem.NewStringField(kind, value)
 	case passitem.FieldPasskey:

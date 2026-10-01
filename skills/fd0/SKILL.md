@@ -273,7 +273,7 @@ fd0 pass field get github username --raw
 fd0 pass file export github SSH/recovery-key.pem --out ./recovery-key.pem
 ```
 
-Use `fd0 pass field set NAME PATH - --secret` for values that should not appear in shell history. A pass item is shared by sharing its scope; there is no separate per-item ACL. For browser/autofill-style lookup, use `fd0 pass find --url URL --json` and then retrieve the needed field explicitly.
+Use `fd0 pass field set NAME PATH - --secret` for values that should not appear in shell history. Updating an existing field keeps its text or secret type unless `--type` is given, and empty stdin is rejected instead of clearing the value. A pass item is shared by sharing its scope; there is no separate per-item ACL. For browser/autofill-style lookup, use `fd0 pass find --url URL --json` and then retrieve the needed field explicitly.
 
 ### Password tags
 

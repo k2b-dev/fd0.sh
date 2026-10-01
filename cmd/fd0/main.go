@@ -461,7 +461,7 @@ type passFieldSetCmd struct {
 	Name     string `arg:"" help:"Item name."`
 	Path     string `arg:"" help:"Field path, e.g. password or Recovery/code-1."`
 	Value    string `arg:"" optional:"" help:"Value. Use - to read from stdin."`
-	Type     string `name:"type" help:"Field type: text, secret, passkey." default:"text"`
+	Type     string `name:"type" help:"Field type: text, secret, passkey. Default: keep an existing text or secret type, otherwise text."`
 	Secret   bool   `name:"secret" help:"Shortcut for --type secret."`
 	Generate bool   `name:"generate" help:"Generate a secret value."`
 	Length   int    `name:"length" help:"Generated password length." default:"32"`
