@@ -40,6 +40,21 @@ function testPage(): {
 }
 
 describe("login picker", () => {
+  test("outside dismissal does not restore focus to the form", async () => {
+    const { window, document, anchor } = testPage();
+    const picker = mountLoginPicker(document, anchor, matches, async () => {});
+    const other = document.createElement("input");
+    document.body.append(other);
+    other.focus();
+    let restored = false;
+    anchor.addEventListener("focus", () => { restored = true; });
+    other.dispatchEvent(new window.Event("pointerdown", { bubbles: true }) as unknown as Event);
+    expect(picker.host.isConnected).toBe(false);
+    expect(restored).toBe(false);
+    expect(document.activeElement).toBe(other);
+    await window.close();
+  });
+
   test("renders untrusted metadata as text and selects a login", async () => {
     const { document, anchor } = testPage();
     let selected = "";

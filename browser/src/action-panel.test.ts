@@ -38,6 +38,24 @@ function pointerEvent(
 }
 
 describe("credential action panel", () => {
+  test("outside dismissal does not steal focus or refocus on the next frame", async () => {
+    const { window, document, anchor } = page();
+    const panel = mountCredentialActionPanel(document, anchor, "https://example.com", undefined, [], [], {
+      useGenerated() {}, async save() {}, async update() {}, async addTOTP() {},
+    });
+    const other = document.createElement("input");
+    document.body.append(other);
+    other.focus();
+    let restored = false;
+    anchor.addEventListener("focus", () => { restored = true; });
+    other.dispatchEvent(pointerEvent(window, "pointerdown", { bubbles: true }));
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    expect(panel.host.isConnected).toBe(false);
+    expect(restored).toBe(false);
+    expect(document.activeElement).toBe(other);
+    await window.close();
+  });
+
   test("opens top-right and keeps a dragged panel inside the viewport", async () => {
     const { window, document, anchor } = page();
     Object.defineProperty(window, "innerWidth", {
@@ -417,6 +435,30 @@ describe("credential action panel", () => {
     await settle();
     expect(updates).toBe(0);
     panel.close();
+    await window.close();
+  });
+
+  test("returns focus to the field after a successful save", async () => {
+    const { window, document, anchor } = page();
+    anchor.focus();
+    const panel = mountCredentialActionPanel(
+      document,
+      anchor,
+      "https://example.com",
+      { username: "demo", password: "synthetic-secret", kind: "login" },
+      [],
+      [{ id: "s_personal", label: "Personal" }],
+      { useGenerated() {}, async save() {}, async update() {}, async addTOTP() {} },
+    );
+    const save = [...panel.root.querySelectorAll<HTMLButtonElement>("button")]
+      .find((element) => element.textContent?.trim() === "Save login");
+    expect(save).toBeDefined();
+    save!.focus();
+    save!.click();
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(document.querySelector("[data-fd0-credential-actions]")).toBeNull();
+    expect(document.activeElement).toBe(anchor);
     await window.close();
   });
 });

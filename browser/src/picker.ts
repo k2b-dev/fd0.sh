@@ -12,6 +12,7 @@ export type LoginPicker = {
   host: HTMLElement;
   root: ShadowRoot;
   close: (restoreFocus?: boolean) => void;
+  focusFirst: () => void;
 };
 
 export type LoginNotice = {
@@ -91,7 +92,7 @@ export function mountLoginPrompt(
   title: string,
   message: string,
   retry: () => void,
-  onClose?: () => void,
+  onClose?: (restoredFocus: boolean) => void,
 ): LoginPrompt {
   const host = document.createElement("div");
   host.dataset.fd0LoginPrompt = "";
@@ -168,8 +169,9 @@ export function mountLoginPrompt(
     view?.removeEventListener("resize", position);
     view?.removeEventListener("scroll", position, true);
     host.remove();
-    onClose?.();
-    if (restoreFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
+    const restored = restoreFocus && anchor.isConnected;
+    onClose?.(restored);
+    if (restored) anchor.focus({ preventScroll: true });
   }
   function onCloseClick(): void {
     close();
@@ -179,7 +181,7 @@ export function mountLoginPrompt(
     retry();
   }
   function onPointerDown(event: Event): void {
-    if (!event.composedPath().includes(host)) close();
+    if (!event.composedPath().includes(host)) close(false);
   }
 
   closeButton.addEventListener("click", onCloseClick);
@@ -235,9 +237,10 @@ export function mountLoginPicker(
   document: Document,
   anchor: HTMLElement,
   matches: LoginMatch[],
-  select: (credentialId: string) => Promise<void>,
-  onClose?: () => void,
+  select: (credentialId: string, signal: AbortSignal) => Promise<void>,
+  onClose?: (restoredFocus: boolean) => void,
   openTools?: () => void,
+  focusOnOpen = true,
 ): LoginPicker {
   if (matches.length === 0) throw new Error("A login picker requires at least one match.");
 
@@ -321,6 +324,7 @@ export function mountLoginPicker(
 
   let activeIndex = 0;
   let busy = false;
+  let selection: AbortController | undefined;
   let closed = false;
   const view = document.defaultView;
 
@@ -344,9 +348,11 @@ export function mountLoginPicker(
     });
     status.textContent = "Filling login…";
     try {
-      await select(matches[index].id);
+      selection = new AbortController();
+      await select(matches[index].id, selection.signal);
       close(false);
     } catch (error) {
+      if (closed) return;
       busy = false;
       delete panel.dataset.busy;
       options.forEach((option) => {
@@ -387,12 +393,12 @@ export function mountLoginPicker(
   }
 
   function onKeyDown(event: KeyboardEvent): void {
-    if (busy) return;
     if (event.key === "Escape") {
       event.preventDefault();
       close();
       return;
     }
+    if (busy) return;
     if (!event.composedPath().includes(list)) return;
     switch (event.key) {
       case "ArrowDown":
@@ -419,7 +425,7 @@ export function mountLoginPicker(
   }
 
   function onPointerDown(event: Event): void {
-    if (!event.composedPath().includes(host)) close();
+    if (!event.composedPath().includes(host)) close(false);
   }
 
   function onCloseClick(): void {
@@ -429,14 +435,16 @@ export function mountLoginPicker(
   function close(restoreFocus = true): void {
     if (closed) return;
     closed = true;
+    selection?.abort();
     panel.removeEventListener("keydown", onKeyDown);
     closeButton.removeEventListener("click", onCloseClick);
     document.removeEventListener("pointerdown", onPointerDown, true);
     view?.removeEventListener("resize", position);
     view?.removeEventListener("scroll", position, true);
     host.remove();
-    onClose?.();
-    if (restoreFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
+    const restored = restoreFocus && anchor.isConnected;
+    onClose?.(restored);
+    if (restored) anchor.focus({ preventScroll: true });
   }
 
   panel.addEventListener("keydown", onKeyDown);
@@ -446,9 +454,10 @@ export function mountLoginPicker(
   view?.addEventListener("scroll", position, true);
   position();
   view?.requestAnimationFrame(position);
-  options[0].focus({ preventScroll: true });
+  const focusFirst = () => options[0].focus({ preventScroll: true });
+  if (focusOnOpen) focusFirst();
 
-  return { host, root, close };
+  return { host, root, close, focusFirst };
 }
 
 const pickerStyles = `

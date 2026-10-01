@@ -45,7 +45,7 @@ export type ActionLoginMatch = LoginMatch & {
 export type CredentialActionPanel = {
   host: HTMLElement;
   root: ShadowRoot;
-  close(): void;
+  close(restoreFocus?: boolean): void;
 };
 
 export function mountCredentialActionPanel(
@@ -56,6 +56,7 @@ export function mountCredentialActionPanel(
   matches: ActionLoginMatch[],
   scopes: VaultChoice[],
   actions: CredentialActions,
+  focusOnOpen = true,
 ): CredentialActionPanel {
   const host = document.createElement("div");
   host.dataset.fd0CredentialActions = "";
@@ -377,7 +378,12 @@ export function mountCredentialActionPanel(
     try {
       await action();
       status.textContent = success;
-      view?.setTimeout(close, 700);
+      // Disabled controls drop focus to the page; hand it back to the field
+      // unless the user has moved on in the meantime.
+      view?.setTimeout(() => {
+        const active = document.activeElement;
+        close(!active || active === host || active === document.body);
+      }, 700);
     } catch (error) {
       delete panel.dataset.busy;
       for (const control of panel.querySelectorAll<
@@ -563,7 +569,7 @@ export function mountCredentialActionPanel(
     }
   }
 
-  function close(): void {
+  function close(restoreFocus = true): void {
     if (closed) return;
     closed = true;
     document.removeEventListener("pointerdown", onPointerDown, true);
@@ -572,11 +578,11 @@ export function mountCredentialActionPanel(
     passwordInput.value = "";
     totpURI.value = "";
     host.remove();
-    if (anchor.isConnected) anchor.focus({ preventScroll: true });
+    if (restoreFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
   }
 
   function onPointerDown(event: Event): void {
-    if (panel.dataset.busy === undefined && !event.composedPath().includes(host)) close();
+    if (panel.dataset.busy === undefined && !event.composedPath().includes(host)) close(false);
   }
 
   function onKeyDown(event: KeyboardEvent): void {
@@ -635,7 +641,7 @@ export function mountCredentialActionPanel(
       visible ? "Show password" : "Hide password",
     );
   });
-  closeButton.addEventListener("click", close);
+  closeButton.addEventListener("click", () => close());
   useButton.addEventListener("click", onUse);
   saveButton.addEventListener("click", onSave);
   updateButton.addEventListener("click", onUpdate);
@@ -652,9 +658,13 @@ export function mountCredentialActionPanel(
   renderOptions();
   renderStrength();
   position();
+  const previousFocus = document.activeElement;
   view?.requestAnimationFrame(() => {
+    if (closed) return;
     position();
-    (matches.length > 0 ? selected : title).focus({ preventScroll: true });
+    if (focusOnOpen && document.activeElement === previousFocus) {
+      (matches.length > 0 ? selected : title).focus({ preventScroll: true });
+    }
   });
   return { host, root, close };
 }

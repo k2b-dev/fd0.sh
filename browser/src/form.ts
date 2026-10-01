@@ -27,10 +27,15 @@ export type LoginCandidate = {
 type FormAnchor = Element | ShadowRoot | undefined;
 type InputRoot = Document | ShadowRoot | HTMLFormElement;
 
+function autocompleteTokens(value: string): string[] {
+  return value.toLowerCase().trim().split(/\s+/);
+}
+
 export function usernameScore(field: InputMetadata): number {
-  const autocomplete = field.autocomplete.toLowerCase();
-  if (autocomplete === "username") return 120;
-  if (autocomplete === "email") return 110;
+  if (!["text", "email", "tel"].includes(field.type)) return 0;
+  const autocomplete = autocompleteTokens(field.autocomplete);
+  if (autocomplete.includes("username")) return 120;
+  if (autocomplete.includes("email")) return 110;
 
   const identity = `${field.name} ${field.id}`.toLowerCase();
   if (/\b(user(name)?|login|email)\b/.test(identity)) return 90;
@@ -41,9 +46,9 @@ export function usernameScore(field: InputMetadata): number {
 
 export function passwordScore(field: InputMetadata): number {
   if (field.type !== "password") return 0;
-  const autocomplete = field.autocomplete.toLowerCase();
-  if (autocomplete === "new-password") return -1;
-  if (autocomplete === "current-password") return 120;
+  const autocomplete = autocompleteTokens(field.autocomplete);
+  if (autocomplete.includes("new-password")) return -1;
+  if (autocomplete.includes("current-password")) return 120;
   return 60;
 }
 
@@ -51,46 +56,41 @@ export function findLoginFields(
   document: Document,
   anchor?: FormAnchor,
 ): LoginFields | undefined {
-  const inputs = collectInputs(inputRoot(document, anchor)).filter(isFillable);
-  const password = bestInput(inputs, passwordScore);
-  if (!password) return undefined;
-
-  const beforePassword = inputs.filter(
-    (input) =>
-      input !== password &&
-      Boolean(input.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING),
-  );
-  const username = bestInput(
-    beforePassword.length > 0 ? beforePassword : inputs.filter((input) => input !== password),
-    usernameScore,
-  );
-  return { username, password };
+  const fields = findCredentialFields(document, anchor);
+  return fields.currentPassword
+    ? { username: fields.username, password: fields.currentPassword }
+    : undefined;
 }
 
 export function findCredentialFields(
   document: Document,
   anchor?: FormAnchor,
 ): CredentialFields {
+  if (anchor && !anchor.isConnected) return {};
   const inputs = collectInputs(inputRoot(document, anchor)).filter(isFillable);
   const passwordInputs = inputs.filter((input) => input.type.toLowerCase() === "password");
   const currentPassword = passwordInputs.find(
-    (input) => input.autocomplete.toLowerCase() === "current-password",
+    (input) => autocompleteTokens(input.autocomplete).includes("current-password"),
+  ) ?? passwordInputs.find((input) =>
+    !autocompleteTokens(input.autocomplete).includes("new-password") &&
+    /\b(old|current|existing)\b/i.test(passwordIdentity(input)),
   ) ??
     (passwordInputs.length === 1 &&
-    passwordInputs[0].autocomplete.toLowerCase() !== "new-password"
+    !autocompleteTokens(passwordInputs[0].autocomplete).includes("new-password") &&
+    !/\b(new|create|signup|register|confirm|confirmation|repeat|again|verify|retype)\b/i.test(passwordIdentity(passwordInputs[0]))
       ? passwordInputs[0]
       : undefined);
   const confirmationInputs = passwordInputs.filter((input) =>
-    /\b(confirm|confirmation|repeat)\b/i.test(
+    /\b(confirm|confirmation|repeat|again|verify|retype)\b|\b(password|passwd|pwd|pass)\s*2\b/i.test(
       passwordIdentity(input),
     ),
   );
   const explicitNewPasswords = passwordInputs.filter(
-    (input) => input.autocomplete.toLowerCase() === "new-password",
+    (input) => autocompleteTokens(input.autocomplete).includes("new-password"),
   );
   const namedNewPasswords = passwordInputs.filter(
     (input) =>
-      !confirmationInputs.includes(input) &&
+      input !== currentPassword && !confirmationInputs.includes(input) &&
       /\b(new|create|signup|register)\b/i.test(
         passwordIdentity(input),
       ),
@@ -98,7 +98,7 @@ export function findCredentialFields(
   const newPassword =
     explicitNewPasswords.find((input) => !confirmationInputs.includes(input)) ??
     namedNewPasswords[0] ??
-    (passwordInputs.length > 1
+    (confirmationInputs.length === 1 && passwordInputs.length <= 3
       ? passwordInputs.find(
           (input) => input !== currentPassword && !confirmationInputs.includes(input),
         )
@@ -114,13 +114,18 @@ export function findCredentialFields(
           Boolean(input.compareDocumentPosition(passwordAnchor) & Node.DOCUMENT_POSITION_FOLLOWING),
       )
     : inputs;
-  const username = bestInput(beforePassword, usernameScore);
+  // An explicit autocomplete=username wins wherever it sits, e.g. an input
+  // associated via form=. Otherwise the username precedes the password, so a
+  // later email field (newsletter, recovery address) is not mistaken for it.
+  const username = inputs.find((input) => autocompleteTokens(input.autocomplete).includes("username")) ??
+    bestInput(beforePassword, usernameScore) ??
+    bestInput(inputs.filter((input) => input.type.toLowerCase() !== "password"), usernameScore);
   const otp = bestInput(inputs, otpScore);
   return { username, currentPassword, newPassword, confirmPassword, otp };
 }
 
 function passwordIdentity(input: HTMLInputElement): string {
-  return `${input.name} ${input.id} ${input.getAttribute("aria-label") ?? ""}`.replace(
+  return `${input.name} ${input.id} ${input.getAttribute("aria-label") ?? ""}`.replace(/([a-z])([A-Z])/g, "$1 $2").replace(
     /[_-]+/g,
     " ",
   );
@@ -168,15 +173,15 @@ export function fillOTP(
   anchor?: FormAnchor,
 ): boolean {
   const field = findCredentialFields(document, anchor).otp;
-  if (!field) return false;
+  if (!field || field.value !== "") return false;
   setInputValue(field, code);
   return true;
 }
 
 export function otpScore(field: InputMetadata): number {
-  const autocomplete = field.autocomplete.toLowerCase();
-  if (autocomplete === "one-time-code") return 140;
-  const identity = `${field.name} ${field.id}`.toLowerCase();
+  const autocomplete = autocompleteTokens(field.autocomplete);
+  if (autocomplete.includes("one-time-code")) return 140;
+  const identity = `${field.name} ${field.id}`.toLowerCase().replace(/[_-]+/g, " ");
   if (/\b(otp|totp|one.?time|verification.?code|auth.?code|2fa|mfa)\b/.test(identity)) {
     return field.type === "text" || field.type === "tel" || field.type === "number" ? 100 : 0;
   }
@@ -195,6 +200,11 @@ export function fillLogin(
   if (fields.username && credential.username) {
     setInputValue(fields.username, credential.username);
     usernameFilled = true;
+  }
+  // Page input handlers can synchronously replace or disable the password field.
+  if (!fields.password.isConnected || !isFillable(fields.password) ||
+    findLoginFields(document, anchor)?.password !== fields.password) {
+    return { usernameFilled, passwordFilled: false };
   }
   setInputValue(fields.password, credential.password);
   return { usernameFilled, passwordFilled: true };
@@ -220,7 +230,9 @@ function bestInput(
 }
 
 export function collectInputs(root: InputRoot): HTMLInputElement[] {
-  const inputs = [...root.querySelectorAll<HTMLInputElement>("input")];
+  const inputs = root instanceof HTMLFormElement
+    ? [...root.elements].filter((element): element is HTMLInputElement => element instanceof HTMLInputElement)
+    : [...root.querySelectorAll<HTMLInputElement>("input")];
   for (const element of root.querySelectorAll<HTMLElement>("*")) {
     if (element.shadowRoot) {
       inputs.push(...collectInputs(element.shadowRoot));

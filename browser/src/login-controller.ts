@@ -27,6 +27,7 @@ export function installLoginController(
     origin: string,
     credentialId: string,
     anchor: HTMLInputElement,
+    signal: AbortSignal,
   ) => Promise<void>,
   openTools?: (anchor: HTMLInputElement, lookup: LoginLookup) => void,
 ): LoginController {
@@ -162,9 +163,11 @@ export function installLoginController(
         prompt = undefined;
         retry();
       },
-      () => {
+      (restoredFocus) => {
         prompt = undefined;
-        suppressFocus = nextAnchor;
+        // Only the focus fd0 hands back is suppressed; a later user focus
+        // on the same field shows suggestions again.
+        if (restoredFocus) suppressFocus = nextAnchor;
       },
     );
   }
@@ -176,10 +179,11 @@ export function installLoginController(
     if (!openTools) return false;
     const sequence = ++openSequence;
     mountTrigger(nextAnchor, "tools");
-    if (explicit) trigger?.setBusy(true);
+    if (!explicit) return false;
+    trigger?.setBusy(true);
     try {
       const result = await credentials();
-      if (disposed || sequence !== openSequence) return false;
+      if (disposed || sequence !== openSequence || !nextAnchor.isConnected) return false;
       picker?.close(false);
       picker = undefined;
       prompt?.close(false);
@@ -219,7 +223,7 @@ export function installLoginController(
     } finally {
       if (explicit) trigger?.setBusy(false);
     }
-    if (disposed || sequence !== openSequence) {
+    if (disposed || sequence !== openSequence || !nextAnchor.isConnected) {
       return false;
     }
     if (result.credentials.length === 0) {
@@ -241,10 +245,10 @@ export function installLoginController(
       document,
       nextAnchor,
       result.credentials,
-      (credentialId) => select(result.origin, credentialId, nextAnchor),
-      () => {
+      (credentialId, signal) => select(result.origin, credentialId, nextAnchor, signal),
+      (restoredFocus) => {
         picker = undefined;
-        suppressFocus = nextAnchor;
+        if (restoredFocus) suppressFocus = nextAnchor;
       },
       openTools
         ? () => {
@@ -252,6 +256,7 @@ export function installLoginController(
             openTools(nextAnchor, result);
           }
         : undefined,
+      explicit,
     );
     return true;
   }
@@ -269,7 +274,12 @@ export function installLoginController(
     const target = preferred ?? event.target;
     const nextToolsAnchor = toolsAnchor(target);
     const nextAnchor = nextToolsAnchor ?? loginAnchor(target);
-    if (!nextAnchor) return;
+    if (!nextAnchor) {
+      if (![picker?.host, prompt?.host, trigger?.host].some(
+        (host) => host && event.composedPath().includes(host),
+      )) openSequence += 1;
+      return;
+    }
     if (suppressFocus === nextAnchor) {
       suppressFocus = undefined;
       return;
@@ -292,6 +302,43 @@ export function installLoginController(
     return nextTools ? openToolsFor(nextTools, true) : false;
   }
 
+  function onFieldInput(event: Event): void {
+    if (!anchor || !event.composedPath().includes(anchor)) return;
+    openSequence += 1;
+    picker?.close(false);
+    picker = undefined;
+    prompt?.close(false);
+    prompt = undefined;
+  }
+
+  function onFocusOut(event: FocusEvent): void {
+    if (!anchor || !event.composedPath().includes(anchor)) return;
+    openSequence += 1;
+    // Moving into fd0 is intentional; moving elsewhere dismisses suggestions.
+    const related = event.relatedTarget;
+    const relatedHost = related instanceof Node && related.getRootNode() instanceof ShadowRoot
+      ? (related.getRootNode() as ShadowRoot).host
+      : related;
+    if ([picker?.host, prompt?.host, trigger?.host].some(
+      (host) => host && relatedHost === host,
+    )) return;
+    picker?.close(false);
+    picker = undefined;
+    prompt?.close(false);
+    prompt = undefined;
+  }
+
+  function onFieldKeyDown(event: KeyboardEvent): void {
+    // Dismiss passive suggestions without consuming the page's Escape key.
+    if (event.key === "Escape") onFieldInput(event);
+    // ArrowDown moves from the field into passive suggestions, like the
+    // browser's own autofill, so keyboard users can reach them.
+    if (event.key === "ArrowDown" && picker && anchor && event.composedPath().includes(anchor)) {
+      event.preventDefault();
+      picker.focusFirst();
+    }
+  }
+
   function invalidate(): void {
     cachedLookup = undefined;
     cachedAt = 0;
@@ -303,6 +350,10 @@ export function installLoginController(
     disposed = true;
     openSequence += 1;
     document.removeEventListener("focusin", onFocus, true);
+    document.removeEventListener("focusout", onFocusOut, true);
+    document.removeEventListener("input", onFieldInput, true);
+    document.removeEventListener("change", onFieldInput, true);
+    document.removeEventListener("keydown", onFieldKeyDown, true);
     picker?.close(false);
     prompt?.close(false);
     trigger?.close();
@@ -310,6 +361,10 @@ export function installLoginController(
   }
 
   document.addEventListener("focusin", onFocus, true);
+  document.addEventListener("focusout", onFocusOut, true);
+  document.addEventListener("input", onFieldInput, true);
+  document.addEventListener("change", onFieldInput, true);
+  document.addEventListener("keydown", onFieldKeyDown, true);
   return { open, invalidate, dispose };
 }
 

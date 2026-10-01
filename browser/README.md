@@ -82,6 +82,17 @@ opens matching logins. **Save login** keeps title, username, visible password,
 generator controls, vault, and the explicit save/update action in one compact
 editor. TOTP setup stays collapsed until requested.
 
+Automatic login suggestions leave the keyboard focus in your field. Typing or
+pressing Escape dismisses them. Click the fd0 button to use the login picker
+with the keyboard or open **Password tools** to generate or save a password.
+Closing the picker or editing its target fields cancels a pending fill.
+Automatic one-time codes only fill empty fields that you have not edited.
+
+If a site signs you in without loading a new page, fd0 may not offer to save
+the login automatically. While the credentials are still in the form, open
+**Password tools**, review the values, and choose **Save login**, **Save as new**,
+or **Update login** as appropriate.
+
 The toolbar action selects one concrete frame containing a visible credential
 field. Existing HTTPS tabs are reconnected after an extension rebuild; a page
 reload is not required.
