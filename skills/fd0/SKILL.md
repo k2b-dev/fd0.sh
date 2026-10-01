@@ -303,6 +303,22 @@ include item tags. Default list/find columns are unchanged. Adding an existing
 tag or removing an absent tag does not create a new revision. Use explicit
 `--scope` when an item name could refer to multiple scopes.
 
+## Services
+
+`fd0 service` holds credentials that programs consume, one record per service with typed fields (`secret`, `text`, `file`), optional env names and change stamps. Use `pass` for logins people use and `service` for values software reads.
+
+```sh
+fd0 service add pg-1 --scope ops --tag postgres
+fd0 secret get OLD_NAME --raw | fd0 service set pg-1 postgres-password - --env POSTGRES_PASSWORD
+fd0 service set pg-1 --env-file - < app.env          # KEY=VALUE lines -> secret fields
+fd0 service show pg-1                                # secrets and files stay masked
+fd0 service env pg-1 --format systemd-env | ssh host 'sudo install -m 600 /dev/stdin /etc/app.env'
+fd0 service k8s-secret pg-1 -n app --name runtime --key postgres-password=DATABASE_PASSWORD \
+  | kubectl apply --server-side --field-manager=fd0-pg-1 -f -
+```
+
+Values are accepted only from stdin (`-`), never as arguments. `env` dialects are `systemd-env`, `docker-env` and `sh`; pick the one the consumer parses. Rendering commands refuse a terminal, which prevents accidents but is not a boundary: an agent moving values should only pipe them between commands and verify with `cmp -s <(…) <(…)`, never print them.
+
 ## Browser autofill
 
 The fd0 Chrome extension is published at

@@ -12,6 +12,7 @@ import (
 	"github.com/valentinkolb/fd0.sh/internal/chain"
 	"github.com/valentinkolb/fd0.sh/internal/kubeconfig"
 	"github.com/valentinkolb/fd0.sh/internal/passitem"
+	"github.com/valentinkolb/fd0.sh/internal/service"
 	"github.com/valentinkolb/fd0.sh/internal/sshhost"
 	"github.com/valentinkolb/fd0.sh/internal/sshkey"
 	"github.com/valentinkolb/fd0.sh/internal/talosctx"
@@ -48,6 +49,8 @@ func OrganizationKind(recordType string) (ItemKind, error) {
 		return KindKube, nil
 	case talosctx.TypeTalosContext:
 		return KindTalos, nil
+	case service.TypeService:
+		return KindService, nil
 	default:
 		return ItemKind{}, errors.New("unsupported item type")
 	}

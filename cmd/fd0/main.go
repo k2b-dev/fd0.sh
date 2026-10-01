@@ -49,6 +49,7 @@ type rootCLI struct {
 	Browser  browserCmd  `cmd:"" help:"Connect fd0 to a web browser."`
 	Talos    talosCmd    `cmd:"" help:"Manage Talos Linux contexts + secrets.yaml DR bundles."`
 	Kube     kubeCmd     `cmd:"" help:"Manage Kubernetes kubeconfig clusters (Talos, EKS, GKE, AKS, …)."`
+	Service  serviceCmd  `cmd:"" help:"Manage credentials that programs consume (env files, Kubernetes Secrets)."`
 	Version  versionCmd  `cmd:"" help:"Print version and exit."`
 	Update   updateCmd   `cmd:"" help:"Update fd0 and fd0-agent from the latest client release."`
 
@@ -678,6 +679,94 @@ type talosSecretsListCmd struct {
 }
 
 // ───── kube ───────────────────────────────────────────────────────────
+// ───── service ────────────────────────────────────────────────────────
+type serviceCmd struct {
+	Add       serviceAddCmd       `cmd:"" help:"Create an empty service."`
+	Set       serviceSetCmd       `cmd:"" help:"Set a field from stdin, or every KEY=VALUE line with --env-file."`
+	Get       serviceGetCmd       `cmd:"" help:"Print one field value."`
+	Unset     serviceUnsetCmd     `cmd:"" help:"Remove a field."`
+	Env       serviceEnvCmd       `cmd:"" help:"Print env-named fields as an environment file (not to a terminal)."`
+	K8sSecret serviceK8sSecretCmd `cmd:"" name:"k8s-secret" help:"Print a Kubernetes Secret manifest (not to a terminal)."`
+	Edit      serviceEditCmd      `cmd:"" help:"Change a service's description."`
+	List      serviceListCmd      `cmd:"" aliases:"ls" help:"List services."`
+	Show      serviceShowCmd      `cmd:"" help:"Show a service; secret and file values stay masked."`
+	Rename    serviceRenameCmd    `cmd:"" help:"Rename a service."`
+	Rm        serviceRmCmd        `cmd:"" help:"Remove a service (tombstone)."`
+	Move      serviceMoveCmd      `cmd:"" help:"Move a service between scopes."`
+	History   itemHistoryCmd      `cmd:"" help:"Show or restore earlier versions of a service."`
+}
+type serviceAddCmd struct {
+	Name        string   `arg:"" help:"Service name."`
+	Scope       string   `name:"scope" help:"Scope label or id."`
+	Description string   `name:"description" help:"Short description."`
+	Tags        []string `name:"tag" help:"Tag (repeatable)."`
+}
+type serviceSetCmd struct {
+	Name    string `arg:"" help:"Service name."`
+	Field   string `arg:"" optional:"" help:"Field name."`
+	Value   string `arg:"" optional:"" help:"Must be - : values are read from stdin, never from arguments."`
+	Type    string `name:"type" enum:"secret,text,file," default:"" help:"Field type for a new field: secret (default), text or file. Existing fields keep their type."`
+	Env     string `name:"env" help:"Environment variable name for this field."`
+	EnvFile bool   `name:"env-file" help:"Read KEY=VALUE lines from stdin; each becomes a secret field with that env name."`
+	Scope   string `name:"scope" help:"Scope label or id."`
+}
+type serviceGetCmd struct {
+	Name  string `arg:"" help:"Service name."`
+	Field string `arg:"" help:"Field name."`
+	Raw   bool   `name:"raw" help:"Print the value exactly, without a trailing newline."`
+	Scope string `name:"scope" help:"Scope label or id."`
+}
+type serviceUnsetCmd struct {
+	Name  string `arg:"" help:"Service name."`
+	Field string `arg:"" help:"Field name."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	Yes   bool   `name:"yes" short:"y" help:"Do not prompt."`
+}
+type serviceEnvCmd struct {
+	Name   string   `arg:"" help:"Service name."`
+	Format string   `name:"format" required:"" enum:"systemd-env,docker-env,sh" help:"Output dialect: systemd-env, docker-env or sh."`
+	Fields []string `name:"field" help:"Only these fields (repeatable). Default: all fields with env names."`
+	Scope  string   `name:"scope" help:"Scope label or id."`
+}
+type serviceK8sSecretCmd struct {
+	Name      string   `arg:"" help:"Service name."`
+	Namespace string   `name:"namespace" short:"n" required:"" help:"Kubernetes namespace."`
+	Secret    string   `name:"name" required:"" help:"Secret name."`
+	Keys      []string `name:"key" help:"FIELD or FIELD=KEY (repeatable). Default: every field under its own name."`
+	Scope     string   `name:"scope" help:"Scope label or id."`
+}
+type serviceEditCmd struct {
+	Name        string  `arg:"" help:"Service name."`
+	Description *string `name:"description" help:"New description."`
+	Scope       string  `name:"scope" help:"Scope label or id."`
+}
+type serviceListCmd struct {
+	Scope string `name:"scope" help:"Scope label or id."`
+	JSON  bool   `name:"json" help:"Machine-readable output."`
+}
+type serviceShowCmd struct {
+	Name  string `arg:"" help:"Service name."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	JSON  bool   `name:"json" help:"Machine-readable output (no secret values)."`
+}
+type serviceRenameCmd struct {
+	Name  string `arg:"" help:"Current service name."`
+	New   string `arg:"" name:"new-name" help:"New service name."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	Force bool   `name:"force" help:"Overwrite an existing service with the new name."`
+}
+type serviceRmCmd struct {
+	Name  string `arg:"" help:"Service name."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	Yes   bool   `name:"yes" short:"y" help:"Do not prompt before removing."`
+}
+type serviceMoveCmd struct {
+	Name    string `arg:"" help:"Service name."`
+	From    string `name:"scope" help:"Source scope."`
+	ToScope string `name:"to-scope" required:"" help:"Destination scope."`
+	Force   bool   `name:"force" help:"Overwrite an existing service with the same name in destination."`
+}
+
 type kubeCmd struct {
 	Enable  kubeEnableCmd  `cmd:"" help:"Enable automatic kubeconfig refresh after fd0 sync."`
 	Disable kubeDisableCmd `cmd:"" help:"Disable automatic kubeconfig refresh after fd0 sync."`
@@ -1067,6 +1156,12 @@ func commandNeedsUnlockedVault(command string) bool {
 		"pass history restore <name> <seq>",
 		"kube history <name>", "kube history show <name>",
 		"kube history restore <name> <seq>",
+		"service history <name>", "service history show <name>",
+		"service history restore <name> <seq>",
+		"service add <name>", "service set <name>", "service set <name> <field>", "service set <name> <field> <value>",
+		"service get <name> <field>", "service unset <name> <field>", "service env <name>", "service k8s-secret <name>",
+		"service edit <name>", "service list", "service ls", "service show <name>",
+		"service rename <name> <new-name>", "service rm <name>", "service move <name>",
 		"talos history <name>", "talos history show <name>",
 		"talos history restore <name> <seq>",
 		"pass move <name>",
@@ -1383,6 +1478,42 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		return cli.RunItemHistory(ctx, cli.KindPass, c.Pass.History.Show.Scope, c.Pass.History.Show.Name, c.Pass.History.Show.JSON)
 	case "pass history restore <name> <seq>":
 		return cli.RunItemRestore(ctx, cli.KindPass, c.Pass.History.Restore.Scope, c.Pass.History.Restore.Name, c.Pass.History.Restore.Seq)
+	case "service history <name>", "service history show <name>":
+		return cli.RunItemHistory(ctx, cli.KindService, c.Service.History.Show.Scope, c.Service.History.Show.Name, c.Service.History.Show.JSON)
+	case "service history restore <name> <seq>":
+		return cli.RunServiceRestore(ctx, c.Service.History.Restore.Scope, c.Service.History.Restore.Name, c.Service.History.Restore.Seq)
+	case "service add <name>":
+		return cli.RunServiceAdd(ctx, cli.ServiceAddOpts{Name: c.Service.Add.Name, Scope: c.Service.Add.Scope, Description: c.Service.Add.Description, Tags: c.Service.Add.Tags})
+	case "service set <name>", "service set <name> <field>", "service set <name> <field> <value>":
+		v := c.Service.Set
+		if !v.EnvFile && v.Value != "-" {
+			return errors.New("service set: values are read from stdin only; use `fd0 service set NAME FIELD -`")
+		}
+		if v.EnvFile && v.Value != "" {
+			return errors.New("service set: --env-file reads stdin; do not pass FIELD or a value")
+		}
+		return cli.RunServiceSet(ctx, cli.ServiceSetOpts{Name: v.Name, Scope: v.Scope, Field: v.Field, Type: v.Type, Env: v.Env, EnvFile: v.EnvFile})
+	case "service get <name> <field>":
+		return cli.RunServiceGet(ctx, c.Service.Get.Scope, c.Service.Get.Name, c.Service.Get.Field, c.Service.Get.Raw)
+	case "service unset <name> <field>":
+		return cli.RunServiceFieldRemove(ctx, c.Service.Unset.Scope, c.Service.Unset.Name, c.Service.Unset.Field, c.Service.Unset.Yes)
+	case "service env <name>":
+		return cli.RunServiceEnv(ctx, c.Service.Env.Scope, c.Service.Env.Name, c.Service.Env.Fields, c.Service.Env.Format)
+	case "service k8s-secret <name>":
+		v := c.Service.K8sSecret
+		return cli.RunServiceK8sSecret(ctx, v.Scope, v.Name, v.Namespace, v.Secret, v.Keys)
+	case "service edit <name>":
+		return cli.RunServiceEdit(ctx, c.Service.Edit.Scope, c.Service.Edit.Name, c.Service.Edit.Description)
+	case "service list", "service ls":
+		return cli.RunServiceList(ctx, c.Service.List.Scope, c.Service.List.JSON)
+	case "service show <name>":
+		return cli.RunServiceShow(ctx, c.Service.Show.Scope, c.Service.Show.Name, c.Service.Show.JSON)
+	case "service rename <name> <new-name>":
+		return cli.RunServiceRename(ctx, c.Service.Rename.Scope, c.Service.Rename.Name, c.Service.Rename.New, c.Service.Rename.Force)
+	case "service rm <name>":
+		return cli.RunServiceRemove(ctx, c.Service.Rm.Scope, c.Service.Rm.Name, c.Service.Rm.Yes)
+	case "service move <name>":
+		return cli.RunServiceMove(ctx, c.Service.Move.Name, c.Service.Move.From, c.Service.Move.ToScope, c.Service.Move.Force)
 	case "kube history <name>", "kube history show <name>":
 		return cli.RunItemHistory(ctx, cli.KindKube, c.Kube.History.Show.Scope, c.Kube.History.Show.Name, c.Kube.History.Show.JSON)
 	case "kube history restore <name> <seq>":

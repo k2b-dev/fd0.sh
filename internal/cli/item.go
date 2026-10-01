@@ -44,7 +44,7 @@ var KindTalosSecrets = ItemKind{Noun: "Talos secrets bundle", Command: "talos se
 
 // itemKinds is the registry every shared behaviour reads, so adding a module
 // means adding it here rather than remembering a second list.
-var itemKinds = []ItemKind{KindSecret, KindPass, KindHost, KindKey, KindKube, KindTalos}
+var itemKinds = []ItemKind{KindSecret, KindPass, KindHost, KindKey, KindKube, KindTalos, KindService}
 
 // ItemHooks carry the parts of an operation that genuinely differ per module.
 //
