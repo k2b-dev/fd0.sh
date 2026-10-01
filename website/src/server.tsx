@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { etag } from "hono/etag";
 import { logger } from "hono/logger";
 import { serveStatic } from "hono/bun";
 import { timingSafeEqual } from "crypto";
@@ -228,6 +229,21 @@ const app = new Hono()
     const target = withoutTrailingSlash(c.req.url);
     if (target) return c.redirect(target, 308);
     await next();
+  })
+  // Short shared caching plus validators for pages and assets that do not
+  // set their own policy; operational endpoints keep their explicit headers.
+  .use(etag())
+  .use(async (c, next) => {
+    await next();
+    if (!["GET", "HEAD"].includes(c.req.method) || c.res.status !== 200) return;
+    if (c.res.headers.has("Cache-Control")) return;
+    if (["/health", "/version", "/metrics"].includes(c.req.path)) return;
+    const type = c.res.headers.get("Content-Type") ?? "";
+    if (c.req.path.startsWith("/_ssr/") || c.req.path.startsWith("/public/")) {
+      c.res.headers.set("Cache-Control", "public, max-age=3600");
+    } else if (/^(text\/html|application\/xml|text\/plain)/.test(type)) {
+      c.res.headers.set("Cache-Control", "public, max-age=300");
+    }
   })
   // Operational endpoints — version-neutral, never under /v1/.
   .get("/health", (c) =>
