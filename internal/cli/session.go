@@ -162,6 +162,10 @@ var ErrAgentNotRunning = errors.New("fd0 agent is not running — run `fd0 unloc
 
 // ErrAgentLocked is returned when the agent is up but no credential has been
 // provided since the last lock.
+// ErrVaultBusy means another fd0 process held the vault lock for the whole
+// wait budget (FD0_LOCK_WAIT).
+var ErrVaultBusy = errors.New("another fd0 instance holds the lock")
+
 var ErrAgentLocked = errors.New("fd0 agent is locked — run `fd0 unlock` to unlock the vault")
 
 // AgentOpener is the production chain.Opener: it forwards Open over the
@@ -248,8 +252,8 @@ func acquireLockFor(ctx context.Context, lk *flock.Flock, wait string) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("another fd0 instance holds the lock at %s (waited %s) — "+
-				"if no other fd0 is running, the agent's auto-sync may be mid-run; retry shortly", lk.Path(), d)
+			return fmt.Errorf("%w at %s (waited %s) — "+
+				"if no other fd0 is running, the agent's auto-sync may be mid-run; retry shortly", ErrVaultBusy, lk.Path(), d)
 		}
 		select {
 		case <-ctx.Done():

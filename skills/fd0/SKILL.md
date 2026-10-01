@@ -3,8 +3,8 @@ name: fd0
 description: >-
   Store, retrieve, share, and organize credentials with the fd0 CLI. Use for
   passwords, secrets, SSH keys and hosts, remote SFTP files, Kubernetes and
-  Talos credentials, scope membership, vault access, and credential injection
-  into authorized commands. Also use for cross-type tags, bulk cleanup,
+  Talos credentials, scope membership, vault access, and passing credentials
+  to scripts and commands without exposing them. Also use for cross-type tags, bulk cleanup,
   resumable scope moves, and restricted metadata-only organization by an agent
   that must not see secret values. Includes fd0 Desktop and CLI workflows.
   Do not use for hosting or operating fd0-server; see docs/HOSTING.md instead.
@@ -222,7 +222,9 @@ fd0 sync                                     # push the new event(s)
 
 Without `--scope`, fd0 looks up the secret across all scopes. If the name exists in exactly one scope it succeeds; if it is ambiguous it errors.
 
-When fetching for a non-interactive context (e.g. CI script substitution, automation), prefer `fd0 secret get NAME --raw` — `--raw` strips trailing newlines that would otherwise pollute environment-variable assignments.
+When fetching for a non-interactive context (e.g. CI script substitution, automation), prefer `fd0 secret get NAME --raw`: it prints the stored value exactly, without the trailing newline fd0 adds for terminals. Pipe values into the consumer (`fd0 secret get NAME --raw | tool --password-stdin`, or `tool --file <(fd0 … --raw)`) instead of passing them as arguments.
+
+Scripts can branch on these exit codes: `0` success, `1` other error, `3` vault locked or agent not running, `4` another fd0 process held the vault lock for the whole wait (`FD0_LOCK_WAIT`, default 5s), `10` update available (`fd0 update --check`), `80` usage error. `fd0 ssh connect HOST CMD` exits with the remote command's status. `fd0 status --json` reports `agent`, `unlocked` and `sshGrantCount`.
 
 ## Password manager
 

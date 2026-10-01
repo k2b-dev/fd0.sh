@@ -762,7 +762,9 @@ type unlockCmd struct {
 type lockCmd struct {
 	All bool `name:"all" help:"Also stop active SSH grants until the next unlock."`
 }
-type statusCmd struct{}
+type statusCmd struct {
+	JSON bool `name:"json" help:"Print agent state as JSON."`
+}
 type agentCmd struct {
 	Status  agentStatusCmd  `cmd:"" help:"Show fd0-agent process, vault, and SSH socket state."`
 	Restart agentRestartCmd `cmd:"" help:"Restart fd0-agent and prompt to unlock again if needed."`
@@ -961,7 +963,20 @@ func main() {
 			os.Exit(10)
 		}
 		fmt.Fprintln(os.Stderr, "✗ "+err.Error())
-		os.Exit(1)
+		os.Exit(exitCode(err))
+	}
+}
+
+// exitCode lets scripts tell the states they must handle apart from other
+// failures. `fd0 ssh connect` with a command exits with the remote status.
+func exitCode(err error) int {
+	switch {
+	case errors.Is(err, cli.ErrAgentLocked), errors.Is(err, cli.ErrAgentNotRunning):
+		return 3
+	case errors.Is(err, cli.ErrVaultBusy):
+		return 4
+	default:
+		return 1
 	}
 }
 
@@ -1172,7 +1187,7 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 	case "agent stop":
 		return cli.RunAgentStop(ctx)
 	case "status":
-		return cli.RunStatus(ctx)
+		return cli.RunStatus(ctx, c.Status.JSON)
 	case "get", "get <name>":
 		return cli.RunGet(ctx, c.Get.Scope, c.Get.Name, c.Get.Raw)
 	case "copy", "copy <name>":

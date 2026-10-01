@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -510,20 +511,33 @@ func RunLock(ctx context.Context) error {
 	return nil
 }
 
+// statusJSON is the machine-readable `fd0 status --json` shape.
+type statusJSON struct {
+	Agent         string `json:"agent"` // "running" or "not_running"
+	Unlocked      bool   `json:"unlocked"`
+	SSHGrantCount int    `json:"sshGrantCount"`
+}
+
 // RunStatus prints agent state.
-func RunStatus(ctx context.Context) error {
+func RunStatus(ctx context.Context, asJSON bool) error {
 	paths, err := fdhome.Resolve()
 	if err != nil {
 		return err
 	}
 	cli := agent.NewClient(paths.AgentSock)
 	if !cli.IsRunning() {
+		if asJSON {
+			return json.NewEncoder(os.Stdout).Encode(statusJSON{Agent: "not_running"})
+		}
 		fmt.Println("agent: not running")
 		return nil
 	}
 	st, err := cli.Status()
 	if err != nil {
 		return err
+	}
+	if asJSON {
+		return json.NewEncoder(os.Stdout).Encode(statusJSON{Agent: "running", Unlocked: st.Unlocked, SSHGrantCount: st.SSHGrantCount})
 	}
 	if st.SSHGrantCount > 0 {
 		fmt.Printf("SSH grants: %d active (fd0 lock --all stops them)\n", st.SSHGrantCount)
