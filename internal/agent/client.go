@@ -80,6 +80,9 @@ type UnlockCredential struct {
 	// when the slot was provisioned with PINPolicyOnce. Empty for
 	// touch-only enrollments (PINPolicyNever).
 	YubikeyPIN []byte
+	// MethodID requires that exactly this auth method unlocks the vault.
+	// Empty means any method of the requested type.
+	MethodID string
 }
 
 // Unlock calls OpUnlock. userChainPath is REQUIRED for the
@@ -98,6 +101,7 @@ func (c *Client) Unlock(vaultPath, userChainPath, methodType string, cred Unlock
 		MethodType:    methodType,
 		Passphrase:    cred.Passphrase,
 		YubikeyPIN:    cred.YubikeyPIN,
+		MethodID:      cred.MethodID,
 	}}
 	r, err := c.doWithTimeout(req, agentUnlockClientTimeout)
 	if err != nil {

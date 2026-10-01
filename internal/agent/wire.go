@@ -174,6 +174,10 @@ type UnlockReq struct {
 	// (touch-only mode). The agent does not retain the PIN beyond
 	// the resolver call.
 	YubikeyPIN []byte `cbor:"yubikey_pin,omitempty"`
+	// MethodID, when set, requires that exactly this auth method unlocks
+	// the vault; another method of the same type is refused. Older clients
+	// leave it empty and keep the type-based behaviour.
+	MethodID string `cbor:"method_id,omitempty"`
 }
 
 // UnlockResp returns the redacted VaultBody (super_priv replaced with zeros).

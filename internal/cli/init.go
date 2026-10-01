@@ -26,8 +26,14 @@ import (
 
 // RunInit performs first-time setup: generate identity, ask for passphrase,
 // build a passphrase auth.set genesis, write user.cbor and vault.enc.
-func RunInit(ctx context.Context) error {
-	pass, err := ReadPassphraseConfirm("Choose a passphrase: ", "Confirm passphrase: ")
+func RunInit(ctx context.Context, keyFile string) error {
+	var pass []byte
+	var err error
+	if keyFile != "" {
+		pass, err = ReadKeyFile(keyFile)
+	} else {
+		pass, err = ReadPassphraseConfirm("Choose a passphrase: ", "Confirm passphrase: ")
+	}
 	if err != nil {
 		return err
 	}
@@ -177,7 +183,13 @@ func InitWithPassphrase(ctx context.Context, pass []byte) (*InitResult, error) {
 // methods without policy metadata keep the optional prompt. Platform-local
 // unlock sends no credential bytes; the agent invokes its configured provider.
 // Prompts read from non-TTY stdin when piped, so shell tests can drive them.
-func RunUnlock(ctx context.Context, agentBin, method string) error {
+// RunUnlock starts the agent and unlocks the vault. With keyFile it never
+// prompts: the key file is the passphrase of an unattended identity, and an
+// already unlocked agent is left as it is so jobs can call it every run.
+func RunUnlock(ctx context.Context, agentBin, method, keyFile string) error {
+	if keyFile != "" && method != "" && method != proto.AuthPassphrase && !strings.HasPrefix(method, "am_") {
+		return errors.New("--key-file unlocks a passphrase method; do not combine it with --method " + method)
+	}
 	paths, err := fdhome.Resolve()
 	if err != nil {
 		return err
@@ -220,15 +232,48 @@ func RunUnlock(ctx context.Context, agentBin, method string) error {
 		}
 		fmt.Fprintln(os.Stderr, "✓ agent started")
 	}
-	if st, err := c.Status(); err == nil && st.Unlocked {
+	// With a key file, resolve the method before anything else so a wrong
+	// selection fails the same way whether or not the agent is unlocked.
+	var keyMethod proto.AuthMethod
+	if keyFile != "" {
+		selector := method
+		if selector == "" {
+			selector = proto.AuthPassphrase
+		}
+		keyMethod, err = pickUnlockMethod(activeMethods, selector)
+		if err != nil {
+			return err
+		}
+		if keyMethod.MethodType != proto.AuthPassphrase {
+			return errors.New("--key-file needs a passphrase method")
+		}
+	}
+	st, err := c.Status()
+	if err != nil {
+		return fmt.Errorf("agent status: %w", err)
+	}
+	if st.Unlocked {
 		fmt.Fprintln(os.Stderr, "✓ vault already unlocked")
 		return nil
 	}
-	chosen, cred, err := promptAuthentication(paths, activeMethods, method)
+	var chosen proto.AuthMethod
+	var cred agent.UnlockCredential
+	if keyFile != "" {
+		// Read only when an unlock is actually needed: an unlocked agent is
+		// left as it is, without checking the key.
+		chosen = keyMethod
+		cred.Passphrase, err = ReadKeyFile(keyFile)
+	} else {
+		chosen, cred, err = promptAuthentication(paths, activeMethods, method)
+	}
 	defer crypto.Wipe(cred.Passphrase)
 	defer crypto.Wipe(cred.YubikeyPIN)
 	if err != nil {
 		return err
+	}
+	if strings.HasPrefix(method, "am_") {
+		// An explicitly chosen method must be the one that unlocks.
+		cred.MethodID = chosen.MethodID
 	}
 	ur, err := c.Unlock(paths.Vault, paths.UserChain, chosen.MethodType, cred)
 	if err != nil {

@@ -504,6 +504,9 @@ func (s *Server) authenticate(ctx context.Context, u *UnlockReq, use func(*proto
 		return errResp(err.Error())
 	}
 	defer wipeOpenResult(&res)
+	if u.MethodID != "" && (res.UsedWrap == nil || res.UsedWrap.MethodID != u.MethodID) {
+		return errResp("the credential belongs to a different auth method than the one requested")
+	}
 	body := res.Body
 	if len(body.SuperPriv) != ed25519.PrivateKeySize {
 		crypto.Wipe(res.UnlockKey)

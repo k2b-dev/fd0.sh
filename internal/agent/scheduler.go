@@ -100,7 +100,10 @@ func (s *Scheduler) runOnce(reason string) {
 	syncCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(syncCtx, bin, "sync", "--wait-lock=60s")
-	env := append(os.Environ(), "FD0_HOME="+s.cfg.Home)
+	// Background syncs never pin a server on first contact, even with
+	// FD0_AUTO_PIN: pinning is an explicit operator step (`fd0 sync`, or
+	// `fd0 sync --pin` for unattended identities).
+	env := append(os.Environ(), "FD0_HOME="+s.cfg.Home, "FD0_BACKGROUND_SYNC=1")
 	// v0.0.4: only inject FD0_SERVER when the operator explicitly
 	// set one. Otherwise we leave it unset so `fd0 sync` resolves
 	// the multi-server list from config.toml — setting FD0_SERVER=""

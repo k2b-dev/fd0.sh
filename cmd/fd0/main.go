@@ -843,10 +843,13 @@ type kubeSyncCmd struct {
 	ReplaceActive bool `name:"replace-active" help:"Allow this merge to replace the active local context and its cluster/user."`
 }
 
-type initCmd struct{}
+type initCmd struct {
+	KeyFile string `name:"key-file" help:"Read the passphrase of an unattended identity from this file (or - for stdin) instead of prompting."`
+}
 type unlockCmd struct {
 	AgentBin string `name:"agent-bin" help:"Path to fd0-agent binary." env:"FD0_AGENT_BIN"`
 	Method   string `name:"method" help:"Auth method type or method_id to use ('passphrase', 'yubikey', or am_...). Overrides [auth].default_method."`
+	KeyFile  string `name:"key-file" help:"Unlock an unattended identity with the passphrase in this file (or - for stdin); never prompts, no-op when already unlocked."`
 }
 type lockCmd struct {
 	All bool `name:"all" help:"Also stop active SSH grants until the next unlock."`
@@ -984,6 +987,7 @@ type recoveryImportCmd struct {
 type syncCmd struct {
 	Server   string `name:"server" help:"fd0-server URL." env:"FD0_SERVER"`
 	WaitLock string `name:"wait-lock" help:"Block up to this duration acquiring ~/.fd0/.lock (Go duration string)." env:"FD0_LOCK_WAIT"`
+	Pin      string `name:"pin" help:"Expected server safety number (60 digits, spaces allowed); pins on first contact and must match an existing pin."`
 }
 
 type doctorCmd struct{}
@@ -1095,7 +1099,7 @@ func maybeAutoUnlock(kctx *kong.Context, c *rootCLI) error {
 			}
 		}
 	}
-	return cli.RunUnlock(context.Background(), c.Unlock.AgentBin, "")
+	return cli.RunUnlock(context.Background(), c.Unlock.AgentBin, "", "")
 }
 
 func commandNeedsUnlockedVault(command string) bool {
@@ -1267,9 +1271,9 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 	}
 	switch command {
 	case "init":
-		return cli.RunInit(ctx)
+		return cli.RunInit(ctx, c.Init.KeyFile)
 	case "unlock":
-		return cli.RunUnlock(ctx, c.Unlock.AgentBin, c.Unlock.Method)
+		return cli.RunUnlock(ctx, c.Unlock.AgentBin, c.Unlock.Method, c.Unlock.KeyFile)
 	case "lock":
 		if c.Lock.All {
 			return cli.RunLockAll(ctx)
@@ -1347,6 +1351,13 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 	case "sync":
 		if c.Sync.WaitLock != "" {
 			os.Setenv("FD0_LOCK_WAIT", c.Sync.WaitLock)
+		}
+		if c.Sync.Pin != "" {
+			pinned, err := cli.WithServerPin(ctx, c.Sync.Pin)
+			if err != nil {
+				return err
+			}
+			ctx = pinned
 		}
 		return cli.RunSyncPrimary(ctx, c.Sync.Server)
 	case "doctor":

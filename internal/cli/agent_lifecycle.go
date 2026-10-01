@@ -96,7 +96,7 @@ func RunAgentRestart(ctx context.Context, agentBin string) error {
 	fmt.Fprintln(os.Stderr, "✓ agent restarted")
 	if wasUnlocked {
 		if IsTTY(os.Stdin) && IsTTY(os.Stderr) {
-			return RunUnlock(ctx, agentBin, "")
+			return RunUnlock(ctx, agentBin, "", "")
 		}
 		fmt.Fprintln(os.Stderr, "vault is locked; run `fd0 unlock`")
 	}

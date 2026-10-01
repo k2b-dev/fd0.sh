@@ -95,6 +95,57 @@ func NormalizeServerURL(s string) (string, error) {
 	return u.String(), nil
 }
 
+// ErrServerPinMismatch means the server's safety number differs from --pin.
+var ErrServerPinMismatch = errors.New("server safety number does not match --pin; refusing to sync")
+
+type serverPinKey struct{}
+
+// WithServerPin returns a context that requires the server's safety number to
+// equal fp (`fd0 sync --pin`): it pins on first contact without a prompt and
+// must also match an existing pin. Only digits and whitespace are accepted.
+func WithServerPin(ctx context.Context, fp string) (context.Context, error) {
+	var b strings.Builder
+	for _, r := range fp {
+		switch {
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+		default:
+			return nil, errors.New("--pin accepts only the digits and spaces of the server's safety number")
+		}
+	}
+	if b.Len() != 60 {
+		return nil, errors.New("--pin must be the server's 12-group safety number (60 digits)")
+	}
+	return context.WithValue(ctx, serverPinKey{}, b.String()), nil
+}
+
+func serverPinFrom(ctx context.Context) string {
+	fp, _ := ctx.Value(serverPinKey{}).(string)
+	return fp
+}
+
+func fingerprintDigits(fp string) string {
+	var b strings.Builder
+	for _, r := range fp {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func checkExpectedFingerprint(expected, canonical string, pub []byte) error {
+	fp, err := ServerFingerprint(canonical, pub)
+	if err != nil {
+		return err
+	}
+	if fingerprintDigits(fp) != expected {
+		return ErrServerPinMismatch
+	}
+	return nil
+}
+
 // ServerFingerprint is the user-facing display string for a server
 // pubkey, formatted exactly like SafetyNumber for identity cards so
 // the operator's eyes don't have to learn a second visual idiom.
@@ -177,6 +228,12 @@ func (s *Session) EnsurePinnedServer(ctx context.Context, serverURL canon.URL) (
 	if err != nil {
 		return nil, err
 	}
+	expected := serverPinFrom(ctx)
+	if expected != "" {
+		if err := checkExpectedFingerprint(expected, canonical, info.ServerPub); err != nil {
+			return nil, err
+		}
+	}
 	if s.Body.PinnedServers == nil {
 		s.Body.PinnedServers = map[string]proto.PinnedServer{}
 	}
@@ -191,7 +248,7 @@ func (s *Session) EnsurePinnedServer(ctx context.Context, serverURL canon.URL) (
 		return ed25519.PublicKey(existing.ServerPub), nil
 	}
 	// First contact: TOFU.
-	if err := pinningPrompt(canonical, info.ServerPub); err != nil {
+	if err := pinningPrompt(canonical, info.ServerPub, expected != ""); err != nil {
 		return nil, err
 	}
 	s.Body.PinnedServers[canonical] = proto.PinnedServer{
@@ -270,7 +327,7 @@ func (s *Session) pinServer(ctx context.Context, serverURL canon.URL, expectedPu
 // path skips is blocking on stdin.
 //
 // THREAT: T47 (auto-pin bypass without operator awareness).
-func pinningPrompt(canonical string, pub []byte) error {
+func pinningPrompt(canonical string, pub []byte, matchedPin bool) error {
 	fp, err := ServerFingerprint(canonical, pub)
 	if err != nil {
 		return err
@@ -280,6 +337,12 @@ func pinningPrompt(canonical string, pub []byte) error {
 	autoPin := os.Getenv(FD0AutoPinEnv) == "1"
 	tty := IsTTY(os.Stdin)
 	switch {
+	case matchedPin:
+		// EnsurePinnedServer already checked --pin against this key.
+		fmt.Fprintln(os.Stderr, "✓ pinned (matches --pin)")
+		return nil
+	case os.Getenv("FD0_BACKGROUND_SYNC") == "1":
+		return errors.New("first contact with a server needs an explicit `fd0 sync` (or `fd0 sync --pin`); background sync never pins")
 	case autoPin:
 		fmt.Fprintln(os.Stderr, "✓ auto-pinned (FD0_AUTO_PIN=1; verify the fingerprint above out of band)")
 		return nil
