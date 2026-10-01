@@ -773,11 +773,30 @@ func RunPassFileAdd(ctx context.Context, o PassFileAddOpts) error {
 	if o.File == "" {
 		return errors.New("pass file add: FILE required")
 	}
-	data, err := safeReadConfigFile(o.File, passitem.MaxFileBytes)
-	if err != nil {
-		return err
-	}
+	var data []byte
+	var err error
 	fieldPath := o.Path
+	if o.File == "-" {
+		// Read stdin before the vault lock, like pass field set.
+		if fieldPath == "" {
+			return errors.New("pass file add: PATH is required when reading the file from stdin")
+		}
+		data, err = io.ReadAll(io.LimitReader(os.Stdin, passitem.MaxFileBytes+1))
+		if err != nil {
+			return fmt.Errorf("pass file add: read stdin: %w", err)
+		}
+		if len(data) == 0 {
+			return errors.New("pass file add: stdin was empty; nothing was changed")
+		}
+		if len(data) > passitem.MaxFileBytes {
+			return fmt.Errorf("pass file add: stdin exceeds %d bytes", passitem.MaxFileBytes)
+		}
+	} else {
+		data, err = safeReadConfigFile(o.File, passitem.MaxFileBytes)
+		if err != nil {
+			return err
+		}
+	}
 	if fieldPath == "" {
 		fieldPath = filepath.Base(o.File)
 	}
@@ -818,6 +837,17 @@ func RunPassFileExport(ctx context.Context, scopeID, itemName, path, out string,
 	data, err := passitem.DecodeFileData(file)
 	if err != nil {
 		return err
+	}
+	if out == "-" {
+		// Stream for pipelines, e.g. kubectl create secret --from-file=k=/dev/stdin.
+		if IsTTY(os.Stdout) {
+			return errors.New("pass file export: refusing to print file contents to a terminal; pipe or redirect stdout")
+		}
+		if _, err := os.Stdout.Write(data); err != nil {
+			return err
+		}
+		stderrln("✓ wrote %d bytes to stdout", len(data))
+		return nil
 	}
 	out, err = passFileExportPath(file.Name, out)
 	if err != nil {

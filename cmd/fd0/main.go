@@ -529,7 +529,7 @@ type passFileCmd struct {
 }
 type passFileAddCmd struct {
 	Name  string `arg:"" help:"Item name."`
-	File  string `arg:"" help:"File path."`
+	File  string `arg:"" help:"File path, or - to read the file from stdin (then PATH is required)."`
 	Path  string `arg:"" optional:"" help:"Field path. Defaults to basename."`
 	MIME  string `name:"mime" help:"MIME type hint."`
 	Scope string `name:"scope" help:"Scope label or id."`
@@ -537,7 +537,7 @@ type passFileAddCmd struct {
 type passFileExportCmd struct {
 	Name  string `arg:"" help:"Item name."`
 	Path  string `arg:"" help:"File field path."`
-	Out   string `name:"out" help:"Explicit local output path. Defaults to the stored basename in the current directory."`
+	Out   string `name:"out" help:"Explicit local output path, or - for stdout (not a terminal). Defaults to the stored basename in the current directory."`
 	Scope string `name:"scope" help:"Scope label or id."`
 	Force bool   `name:"force" help:"Overwrite an existing output file."`
 }

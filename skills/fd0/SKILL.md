@@ -57,8 +57,8 @@ Map the user's intent to the right command before typing anything:
 | Store a passkey field | `fd0 pass field set NAME passkey VALUE --type passkey` |
 | Add or print TOTP | `fd0 pass totp add NAME 'otpauth://...'`; `fd0 pass totp code NAME` |
 | Read or write an item's note | `fd0 pass notes NAME`; `fd0 pass notes set NAME [TEXT]`; `fd0 pass notes rm NAME` |
-| Attach a small key/recovery file | `fd0 pass file add NAME PATH [FIELD]` (32 KiB max per file) |
-| Export an attached file | `fd0 pass file export NAME FIELD --out PATH` |
+| Attach a small key/recovery file | `fd0 pass file add NAME PATH [FIELD]` (32 KiB max per file); `fd0 pass file add NAME - FIELD` reads stdin |
+| Export an attached file | `fd0 pass file export NAME FIELD --out PATH`; `--out -` streams to a pipe, e.g. `kubectl create secret generic S --from-file=k=/dev/stdin` |
 | List metadata across all item types | `fd0 item list --scope LABEL --json` |
 | Add or remove tags on any item | `fd0 item tags add ITEM_ID --scope LABEL --tag TEXT`; `fd0 item tags remove ITEM_ID --scope LABEL --tag TEXT` |
 | Preview a batch cleanup | `fd0 item batch --scope LABEL --id ID --operation add --tag TEXT --dry-run` |
