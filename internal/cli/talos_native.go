@@ -308,17 +308,19 @@ func RunTalosRoleAdd(ctx context.Context, o TalosRoleAddOpts) error {
 		return errors.New("talos role-add: --from, --name, --role all required")
 	}
 
+	// Read under the vault lock, then release it: talosctl talks to the
+	// cluster, and other fd0 commands and SSH must not wait for that.
 	s, err := Open(ctx)
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-
 	scope, err := s.resolveScopeID(o.Scope)
 	if err != nil {
+		s.Close()
 		return err
 	}
 	src, err := lookupTalosContext(s, "", o.SourceContext)
+	s.Close()
 	if err != nil {
 		return err
 	}
@@ -386,6 +388,11 @@ func RunTalosRoleAdd(ctx context.Context, o TalosRoleAddOpts) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	s, err = Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
 	if err := storeTalosContext(ctx, s, scope, c); err != nil {
 		return err
 	}
@@ -417,18 +424,19 @@ func RunTalosKubeconfig(ctx context.Context, contextName, scopeFlag string) erro
 		return fmt.Errorf("talosctl not on PATH (or FD0_TALOSCTL not set): %w", err)
 	}
 
+	// Read under the vault lock, then release it while talosctl talks to
+	// the cluster.
 	s, err := Open(ctx)
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-
 	scope, err := s.resolveScopeID(scopeFlag)
 	if err != nil {
+		s.Close()
 		return err
 	}
-
 	src, err := lookupTalosContext(s, "", contextName)
+	s.Close()
 	if err != nil {
 		return err
 	}
@@ -466,5 +474,10 @@ func RunTalosKubeconfig(ctx context.Context, contextName, scopeFlag string) erro
 	// Refresh-preserving import: keep namespace / tags / description
 	// / insecure-skip-tls-verify from the existing record (if any);
 	// overwrite only the materially-rotated server / CA / cert / key.
+	s, err = Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
 	return addKubeconfigBytesOnSession(ctx, s, scope, src.Name, out, true)
 }
