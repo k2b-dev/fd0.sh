@@ -14,6 +14,7 @@ import (
 	"github.com/valentinkolb/fd0.sh/internal/kubeconfig"
 	"github.com/valentinkolb/fd0.sh/internal/passitem"
 	"github.com/valentinkolb/fd0.sh/internal/proto"
+	"github.com/valentinkolb/fd0.sh/internal/service"
 	"github.com/valentinkolb/fd0.sh/internal/sshhost"
 	"github.com/valentinkolb/fd0.sh/internal/sshkey"
 	"github.com/valentinkolb/fd0.sh/internal/talosctx"
@@ -343,6 +344,22 @@ func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary,
 		summary.Badge = "KUBE"
 		summary.Tags = entry.Tags
 		summary.SearchText = strings.Join([]string{entry.Name, entry.Server, entry.Namespace}, " ")
+	case service.TypeService:
+		svc, err := service.Decode(raw)
+		if err != nil {
+			return ItemSummary{}, err
+		}
+		summary.Title = strings.TrimPrefix(record.Name, cli.KindService.Prefix)
+		summary.Subtitle = strconv.Itoa(len(svc.Fields)) + " " + pluralFields(len(svc.Fields))
+		if svc.Description != "" {
+			summary.Subtitle = svc.Description
+		}
+		summary.Badge = "SERVICE"
+		names := make([]string, 0, len(svc.Fields))
+		for _, f := range svc.Fields {
+			names = append(names, f.Name, f.Env)
+		}
+		summary.SearchText = strings.Join(append([]string{summary.Title, svc.Description}, names...), " ")
 	case talosctx.TypeTalosContext:
 		entry, err := talosctx.Unmarshal(raw)
 		if err != nil {
@@ -534,10 +551,40 @@ func detailFields(record cli.TypedRecord, rawMode bool) ([]FieldView, error) {
 			{Name: "Client certificate", Path: "certificate", Type: "secret", Sensitive: true, Copyable: true, Section: "Credentials"},
 			{Name: "Client key", Path: "key", Type: "secret", Sensitive: true, Copyable: true, Section: "Credentials"},
 		}, nil
+	case service.TypeService:
+		svc, err := service.Decode(raw)
+		if err != nil {
+			return nil, err
+		}
+		fields := []FieldView{}
+		if svc.Description != "" {
+			fields = append(fields, textField("Description", "description", svc.Description, "Details"))
+		}
+		for _, f := range svc.Summaries() {
+			view := FieldView{Name: f.Name, Path: serviceFieldPath + f.Name, Section: "Fields"}
+			if f.Env != "" {
+				view.Name = f.Name + " (" + f.Env + ")"
+			}
+			switch f.Type {
+			case service.FieldText:
+				field, _ := svc.Field(f.Name)
+				view.Type, view.Value, view.Copyable = "text", field.Value, true
+			case service.FieldSecret:
+				view.Type, view.Sensitive, view.Copyable = "secret", true, true
+			default:
+				view.Type, view.Value = "text", strconv.Itoa(f.Bytes)+" bytes (file; use the CLI to export)"
+			}
+			fields = append(fields, view)
+		}
+		return fields, nil
 	default:
 		return []FieldView{{Name: "Value", Path: "value", Type: "secret", Sensitive: true, Copyable: true, Section: "Secret"}}, nil
 	}
 }
+
+// serviceFieldPath prefixes service field paths so they cannot collide with
+// the reserved description path.
+const serviceFieldPath = "field:"
 
 func passFieldViews(fields []passitem.Field, prefix, section string) []FieldView {
 	views := make([]FieldView, 0, len(fields))
@@ -665,6 +712,22 @@ func (s *Service) fieldValue(ctx context.Context, params FieldValueParams) (Fiel
 		if value, ok := values[params.Path]; ok {
 			return FieldValueResult{Value: value}, nil
 		}
+	case service.TypeService:
+		svc, err := service.Decode(raw)
+		if err != nil {
+			return FieldValueResult{}, err
+		}
+		if params.Path == "description" {
+			return FieldValueResult{Value: svc.Description}, nil
+		}
+		field, err := svc.Field(strings.TrimPrefix(params.Path, serviceFieldPath))
+		if err != nil || !strings.HasPrefix(params.Path, serviceFieldPath) {
+			return FieldValueResult{}, fail("not_found", "That field no longer exists.", "Refresh the item.", false)
+		}
+		if field.Type == service.FieldFile {
+			return FieldValueResult{}, fail("unsupported", "File fields cannot be copied as text.", "Use fd0 service get in a terminal pipeline.", false)
+		}
+		return FieldValueResult{Value: field.Value}, nil
 	default:
 		if params.Path == "value" {
 			return FieldValueResult{Value: string(raw)}, nil

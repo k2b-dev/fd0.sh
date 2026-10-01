@@ -6,6 +6,7 @@ import (
 
 	"github.com/valentinkolb/fd0.sh/internal/cli"
 	"github.com/valentinkolb/fd0.sh/internal/kubeconfig"
+	"github.com/valentinkolb/fd0.sh/internal/service"
 	"github.com/valentinkolb/fd0.sh/internal/talosctx"
 )
 
@@ -48,6 +49,14 @@ func (s *Service) renameItem(ctx context.Context, params RenameItemParams) (map[
 			ctx,
 			params.Source.ScopeID,
 			strings.TrimPrefix(params.Source.Name, "talos:"),
+			params.Name,
+			false,
+		)
+	case service.TypeService:
+		renameErr = cli.RunServiceRename(
+			ctx,
+			params.Source.ScopeID,
+			strings.TrimPrefix(params.Source.Name, cli.KindService.Prefix),
 			params.Name,
 			false,
 		)

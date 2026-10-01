@@ -8,6 +8,7 @@ import (
 	"github.com/valentinkolb/fd0.sh/internal/cli"
 	"github.com/valentinkolb/fd0.sh/internal/kubeconfig"
 	"github.com/valentinkolb/fd0.sh/internal/passitem"
+	"github.com/valentinkolb/fd0.sh/internal/service"
 	"github.com/valentinkolb/fd0.sh/internal/sshhost"
 	"github.com/valentinkolb/fd0.sh/internal/sshkey"
 	"github.com/valentinkolb/fd0.sh/internal/talosctx"
@@ -220,6 +221,16 @@ func versionSummary(version cli.SecretVersionEntry) string {
 		return "Kubernetes context"
 	case talosctx.TypeTalosContext:
 		return "Talos context"
+	case service.TypeService:
+		raw, err := payloadJSONOf(version)
+		if err != nil {
+			return "Service"
+		}
+		svc, err := service.Decode(raw)
+		if err != nil {
+			return "Service"
+		}
+		return strconv.Itoa(len(svc.Fields)) + " " + pluralFields(len(svc.Fields))
 	default:
 		return "Secret value"
 	}

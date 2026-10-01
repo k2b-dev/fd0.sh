@@ -8,6 +8,7 @@ import (
 	"github.com/valentinkolb/fd0.sh/internal/kubeconfig"
 	"github.com/valentinkolb/fd0.sh/internal/passitem"
 	"github.com/valentinkolb/fd0.sh/internal/proto"
+	"github.com/valentinkolb/fd0.sh/internal/service"
 	"github.com/valentinkolb/fd0.sh/internal/sshhost"
 	"github.com/valentinkolb/fd0.sh/internal/talosctx"
 )
@@ -31,6 +32,8 @@ func moveItemKind(recordType, recordName string) (cli.ItemKind, string, error) {
 		return cli.KindKube, strings.TrimPrefix(recordName, cli.KindKube.Prefix), nil
 	case recordType == talosctx.TypeTalosContext:
 		return cli.KindTalos, strings.TrimPrefix(recordName, cli.KindTalos.Prefix), nil
+	case recordType == service.TypeService:
+		return cli.KindService, strings.TrimPrefix(recordName, cli.KindService.Prefix), nil
 	default:
 		return cli.ItemKind{}, "", fail(
 			"unsupported_item",
