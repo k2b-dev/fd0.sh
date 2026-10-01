@@ -83,3 +83,20 @@ for (const mode of ["unlock", "grant"]) {
   }));
 
 }
+
+test("unlock keeps active SSH grants in a collapsed summary", () => withPage(async (page) => {
+  await page.evaluate(() => window.authTest.grants(2));
+  const summary = page.getByText("2 active SSH grants");
+  await summary.waitFor();
+  expect(await page.getByRole("button", { name: "Lock everything" }).isVisible()).toBe(false);
+  await summary.click();
+  await page.getByRole("button", { name: "Open SSH: build-1" }).waitFor();
+  expect(await page.getByRole("button", { name: "Lock everything" }).isVisible()).toBe(true);
+}));
+
+test("unlock opens the grant summary when listing grants fails", () => withPage(async (page) => {
+  await page.evaluate(() => window.authTest.grants(1, true));
+  const alert = page.locator(".auth-ssh-grants [role=alert]");
+  await alert.waitFor();
+  expect(await alert.isVisible()).toBe(true);
+}));

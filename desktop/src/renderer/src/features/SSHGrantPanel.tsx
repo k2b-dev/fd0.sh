@@ -104,7 +104,7 @@ export function ActiveSSHGrants(props: { status: VaultStatus | null; onStatus(st
     finally { if (alive) setBusy(false); }
   }
   return <Show when={(props.status?.sshGrantCount ?? 0) > 0}>
-    <details class="auth-ssh-grants">
+    <details class="auth-ssh-grants" open={Boolean(error()) || undefined}>
       <summary>{props.status?.sshGrantCount} active SSH {(props.status?.sshGrantCount ?? 0) === 1 ? "grant" : "grants"}</summary>
       <div class="auth-ssh-grants-content">
         <p>These hosts remain accessible while fd0 is locked.</p>
