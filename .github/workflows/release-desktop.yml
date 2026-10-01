@@ -176,7 +176,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          # Pinned like arm64: the bundled libpcsclite and glibc floor come
+          # from this image, and ubuntu-latest moves to 26.04 in October 2026.
+          - runner: ubuntu-24.04
             arch: x64
             builder_arch: x64
           - runner: ubuntu-24.04-arm
