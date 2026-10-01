@@ -119,5 +119,7 @@ release:
   # The CI workflow aliases the scoped tag (`client-v0.2.0`) into a
   # local `v0.2.0` semver for goreleaser to parse. Use the original
   # scoped tag for the visible Release name so the GitHub Releases UI
-  # surfaces the prefix the user pushed.
+  # surfaces the prefix the user pushed. Do not retitle CLI releases:
+  # fd0 <= 0.17.1 and older install scripts find CLI releases by this
+  # exact title; put headlines into the release notes instead.
   name_template: "{{ .Env.ORIGINAL_TAG }}"
