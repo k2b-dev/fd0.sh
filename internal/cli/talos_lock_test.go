@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/gofrs/flock"
 )
 
 func TestTalosKubeconfigReleasesVaultLockWhileTalosctlRuns(t *testing.T) {
@@ -25,9 +28,12 @@ func TestTalosKubeconfigReleasesVaultLockWhileTalosctlRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	lock := filepath.Join(os.Getenv("FD0_HOME"), ".lock")
+	started := filepath.Join(isolation, "talosctl-started")
+	release := filepath.Join(isolation, "talosctl-release")
 	fake := filepath.Join(isolation, "talosctl")
 	script := "#!/bin/sh\n" +
-		"flock -n '" + lock + "' true || { echo 'vault lock held during talosctl' >&2; exit 3; }\n" +
+		"touch '" + started + "'\n" +
+		"while [ ! -f '" + release + "' ]; do sleep 0.05; done\n" +
 		"cat <<'EOF'\n" +
 		"apiVersion: v1\nkind: Config\n" +
 		"clusters:\n- name: lab\n  cluster:\n    server: https://192.0.2.10:6443\n    certificate-authority-data: QUFB\n" +
@@ -38,7 +44,33 @@ func TestTalosKubeconfigReleasesVaultLockWhileTalosctlRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(envTalosctlBinary, fake)
-	if err := RunTalosKubeconfig(ctx, "lab", scope); err != nil {
+	done := make(chan error, 1)
+	go func() { done <- RunTalosKubeconfig(ctx, "lab", scope) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake talosctl did not start")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	probe := flock.New(lock)
+	free, err := probe.TryLock()
+	if err != nil {
 		t.Fatal(err)
+	}
+	if free {
+		_ = probe.Unlock()
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !free {
+		t.Fatal("vault lock was held while talosctl ran")
 	}
 }
