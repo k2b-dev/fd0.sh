@@ -238,6 +238,12 @@ func (c *Client) Upload(
 	if err != nil {
 		return 0, operationError("create "+remotePath, err)
 	}
+	// The server creates the file with its default mode. Restrict it while
+	// it is still empty so other remote users never read partial content.
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return 0, operationError("restrict permissions on "+remotePath, err)
+	}
 	written, copyErr := copyWithProgress(ctx, file, source, total, progress)
 	syncErr := file.Sync()
 	closeErr := file.Close()
@@ -267,6 +273,14 @@ func (c *Client) Mkdir(remotePath string, parents bool) error {
 	}
 	if err != nil {
 		return operationError("create directory "+remotePath, err)
+	}
+	return nil
+}
+
+// Chmod sets the permission bits of a remote path.
+func (c *Client) Chmod(remotePath string, mode os.FileMode) error {
+	if err := c.client.Chmod(remotePath, mode.Perm()); err != nil {
+		return operationError("set permissions on "+remotePath, err)
 	}
 	return nil
 }

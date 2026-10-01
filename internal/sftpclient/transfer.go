@@ -128,11 +128,14 @@ func (c *Client) UploadPath(
 	temp := path.Join(path.Dir(remoteDestination), "."+path.Base(remoteDestination)+".fd0-part-"+transferSuffix())
 	defer func() { _ = c.Remove(context.Background(), temp, true) }()
 	if source.IsDir() {
-		if err := c.Mkdir(temp, false); err != nil {
+		if err := c.mkdirPrivate(temp); err != nil {
 			return TransferResult{}, err
 		}
 		total, err := c.uploadDirectory(ctx, localSource, temp, progress)
 		if err != nil {
+			return TransferResult{}, err
+		}
+		if err := c.Chmod(temp, source.Mode()); err != nil {
 			return TransferResult{}, err
 		}
 		if _, err := c.Stat(remoteDestination, false); err == nil {
@@ -232,12 +235,15 @@ func (c *Client) uploadDirectory(
 		localPath := filepath.Join(localRoot, entry.Name())
 		remotePath := path.Join(remoteRoot, entry.Name())
 		if info.IsDir() {
-			if err := c.Mkdir(remotePath, false); err != nil {
+			if err := c.mkdirPrivate(remotePath); err != nil {
 				return total, err
 			}
 			written, err := c.uploadDirectory(ctx, localPath, remotePath, progress)
 			total += written
 			if err != nil {
+				return total, err
+			}
+			if err := c.Chmod(remotePath, info.Mode()); err != nil {
 				return total, err
 			}
 			continue
@@ -260,6 +266,16 @@ func (c *Client) uploadDirectory(
 		}
 	}
 	return total, nil
+}
+
+// mkdirPrivate creates a staging directory and restricts it to the owner
+// before anything is written into it; the source mode is applied once the
+// directory is complete.
+func (c *Client) mkdirPrivate(remotePath string) error {
+	if err := c.Mkdir(remotePath, false); err != nil {
+		return err
+	}
+	return c.Chmod(remotePath, 0o700)
 }
 
 func resolveLocalDestination(value, sourceName string) (string, error) {

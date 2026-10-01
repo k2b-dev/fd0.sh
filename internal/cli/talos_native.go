@@ -60,6 +60,7 @@ type TalosNewOpts struct {
 //  5. Leave controlplane.yaml + worker.yaml on disk (the user
 //     hands these to whatever provisions their nodes).
 func RunTalosNew(ctx context.Context, o TalosNewOpts) error {
+	defer trackCleanup()()
 	if _, err := exec.LookPath(talosctlBin()); err != nil {
 		return fmt.Errorf("talosctl not on PATH (or FD0_TALOSCTL not set): %w", err)
 	}
@@ -132,7 +133,7 @@ func RunTalosNew(ctx context.Context, o TalosNewOpts) error {
 
 	// 1. Generate the root PKI bundle into tmpDir.
 	stderrln("→ talosctl gen secrets …")
-	if err := runTalosctl(tmpDir, "gen", "secrets", "-o", tmpSecretsPath); err != nil {
+	if err := runTalosctl(ctx, tmpDir, "gen", "secrets", "-o", tmpSecretsPath); err != nil {
 		return fmt.Errorf("gen secrets: %w", err)
 	}
 	if err := os.Chmod(tmpSecretsPath, 0o600); err != nil {
@@ -150,7 +151,7 @@ func RunTalosNew(ctx context.Context, o TalosNewOpts) error {
 	// 2. Generate controlplane.yaml + worker.yaml + talosconfig into
 	// the same tmpDir. Same chmod-then-move story.
 	stderrln("→ talosctl gen config %q %q …", o.Name, o.Endpoint)
-	if err := runTalosctl(tmpDir, "gen", "config", o.Name, o.Endpoint,
+	if err := runTalosctl(ctx, tmpDir, "gen", "config", o.Name, o.Endpoint,
 		"--with-secrets", secretsPath, "-o", tmpDir); err != nil {
 		return fmt.Errorf("gen config: %w", err)
 	}
@@ -260,8 +261,8 @@ func RunTalosNew(ctx context.Context, o TalosNewOpts) error {
 // runTalosctl is the thin subprocess wrapper. Streams talosctl's
 // stderr to ours; captures stdout so error paths surface the actual
 // command output.
-func runTalosctl(dir string, args ...string) error {
-	cmd := exec.Command(talosctlBin(), args...)
+func runTalosctl(ctx context.Context, dir string, args ...string) error {
+	cmd := exec.CommandContext(ctx, talosctlBin(), args...)
 	cmd.Dir = dir
 	cmd.Stderr = os.Stderr
 	var stdout bytes.Buffer
@@ -299,6 +300,7 @@ type TalosRoleAddOpts struct {
 // against the source cluster, parses the resulting talosconfig, and
 // stores it under NewName in the vault.
 func RunTalosRoleAdd(ctx context.Context, o TalosRoleAddOpts) error {
+	defer trackCleanup()()
 	if _, err := exec.LookPath(talosctlBin()); err != nil {
 		return fmt.Errorf("talosctl not on PATH (or FD0_TALOSCTL not set): %w", err)
 	}
@@ -359,7 +361,7 @@ func RunTalosRoleAdd(ctx context.Context, o TalosRoleAddOpts) error {
 	}
 
 	stderrln("→ talosctl config new --roles %s (against %s)…", o.Role, src.Name)
-	if err := runTalosctl(tmpDir, args...); err != nil {
+	if err := runTalosctl(ctx, tmpDir, args...); err != nil {
 		return fmt.Errorf("talosctl config new: %w", err)
 	}
 	newBytes, err := os.ReadFile(outPath)
@@ -410,6 +412,7 @@ func RunTalosRoleAdd(ctx context.Context, o TalosRoleAddOpts) error {
 // fields (namespace, tags, description) and overwrite only the
 // server/CA/cert/key. Without that, every refresh wiped user state.
 func RunTalosKubeconfig(ctx context.Context, contextName, scopeFlag string) error {
+	defer trackCleanup()()
 	if _, err := exec.LookPath(talosctlBin()); err != nil {
 		return fmt.Errorf("talosctl not on PATH (or FD0_TALOSCTL not set): %w", err)
 	}
@@ -450,7 +453,7 @@ func RunTalosKubeconfig(ctx context.Context, contextName, scopeFlag string) erro
 	}
 
 	stderrln("→ talosctl kubeconfig (context %s) …", src.Name)
-	cmd := exec.Command(talosctlBin(), "--talosconfig", tcfgPath, "kubeconfig", "-")
+	cmd := exec.CommandContext(ctx, talosctlBin(), "--talosconfig", tcfgPath, "kubeconfig", "-")
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {

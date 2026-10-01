@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -934,7 +935,8 @@ func main() {
 		if cli.RestoreTerminal() {
 			fmt.Fprintln(os.Stderr)
 		}
-	}, os.Interrupt)
+		cli.Interrupt(5 * time.Second)
+	}, os.Interrupt, syscall.SIGTERM)
 	defer memguard.Purge()
 
 	var c rootCLI
@@ -1132,7 +1134,7 @@ func legacySecretSpelling(command string) string {
 }
 
 func dispatch(kctx *kong.Context, c *rootCLI) error {
-	ctx := context.Background()
+	ctx := cli.CommandContext()
 	command := legacySecretSpelling(kctx.Command())
 	if command != kctx.Command() {
 		// Reduced to its legacy spelling: read the flags kong actually filled.

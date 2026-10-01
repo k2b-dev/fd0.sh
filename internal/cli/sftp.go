@@ -179,6 +179,7 @@ func RunSFTPStat(ctx context.Context, opts SFTPListOpts) error {
 }
 
 func RunSFTPCopy(ctx context.Context, opts SFTPCopyOpts) error {
+	defer trackCleanup()()
 	sourceRemote, err := validateSFTPCopyOperands(opts.Source, opts.Dest)
 	if err != nil {
 		return err

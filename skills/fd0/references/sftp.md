@@ -49,8 +49,10 @@ even with `--force`; choose a new destination or remove the old tree as a
 separate, explicitly confirmed operation.
 
 Interactive transfers report progress on stderr so stdout remains usable by
-scripts. Ctrl-C cancels the operation; fd0 removes only its temporary partial
-artifact and leaves an existing destination untouched. Desktop exposes the same
+scripts. Ctrl-C or SIGTERM cancels the operation; fd0 removes only its
+temporary partial artifact and leaves an existing destination untouched.
+Uploaded files and staging directories are owner-only until complete, then
+take the source mode. Desktop exposes the same
 progress and cancellation in its transfer queue.
 
 ## Machine-readable reads
