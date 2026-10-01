@@ -329,8 +329,13 @@ if [ "$VERSION" = "latest" ]; then
             name = $0
             sub(/^.*"name": *"/, "", name)
             sub(/".*$/, "", name)
-            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ &&
-                name ~ /^(client|fd0)-v[0-9]+\.[0-9]+\.[0-9]+$/) {
+            # CLI releases are tagged vX.Y.Z. Since 0.15.0 their titles are
+            # free-form, so the signing identity is derived from the tag
+            # (client-vX.Y.Z) unless an old release title names it.
+            if (tag ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) {
+                if (name !~ /^(client|fd0)-v[0-9]+\.[0-9]+\.[0-9]+$/) {
+                    name = "client-" tag
+                }
                 print tag "|" name
             }
             tag = ""

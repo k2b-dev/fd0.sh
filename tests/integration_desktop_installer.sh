@@ -161,8 +161,12 @@ cat > "$BASE/api/releases" <<'EOF'
     "name": "client-v0.0.9"
   },
   {
+    "tag_name": "desktop-v0.2.0",
+    "name": "Desktop 0.2.0 — free-form title"
+  },
+  {
     "tag_name": "v0.1.0",
-    "name": "client-v0.1.0"
+    "name": "CLI 0.1.0 — free-form title"
   }
 ]
 EOF

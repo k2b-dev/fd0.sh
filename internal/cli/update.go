@@ -457,6 +457,12 @@ func clientReleaseDisplayTag(r updateRelease) string {
 	if strings.HasPrefix(r.TagName, "client-v") || strings.HasPrefix(r.TagName, "fd0-v") {
 		return r.TagName
 	}
+	// Since 0.15.0 CLI releases carry free-form titles; the plain vX.Y.Z tag
+	// is the stable marker. Map it to client-vX.Y.Z, the tag that triggered
+	// the signing workflow, so cosign keeps verifying the right identity.
+	if strings.HasPrefix(r.TagName, "v") && releaseVersionNumber(r.TagName) != "" {
+		return canonicalClientReleaseTag(r.TagName)
+	}
 	return ""
 }
 

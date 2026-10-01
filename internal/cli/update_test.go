@@ -146,6 +146,52 @@ func TestRunUpdateCheckUsesLatestClientRelease(t *testing.T) {
 	}
 }
 
+func TestRunUpdateLatestInstallsReleasesWithFreeFormTitles(t *testing.T) {
+	archive := makeUpdateArchive(t, map[string]string{
+		"fd0":       "#!/bin/sh\necho fd0 0.9.0\n",
+		"fd0-agent": "#!/bin/sh\necho fd0-agent 0.9.0\n",
+	})
+	sum := sha256.Sum256(archive)
+	downloads := updateFixtureServer(t, map[string]updateFixtureArchive{
+		"fd0_linux_amd64.tar.gz": {Body: archive, Sum: hex.EncodeToString(sum[:])},
+	})
+	defer downloads.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/releases" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `[
+			{"name":"Desktop 1.2.0 — new window","tag_name":"desktop-v1.2.0","draft":false,"prerelease":false},
+			{"name":"CLI 0.9.0 — consistent selection","tag_name":"v0.9.0","draft":false,"prerelease":false},
+			{"name":"fd0 CLI 0.8.9","tag_name":"v0.8.9","draft":false,"prerelease":false},
+			{"name":"client-v0.8.5","tag_name":"v0.8.5","draft":false,"prerelease":false}
+		]`)
+	}))
+	defer api.Close()
+	prefix := t.TempDir()
+	var out, stderr bytes.Buffer
+	err := RunUpdate(context.Background(), UpdateOptions{
+		CurrentVersion: "0.8.5",
+		Version:        "latest",
+		Prefix:         prefix,
+		Yes:            true,
+		APIBase:        api.URL,
+		ReleaseBase:    downloads.URL,
+		HTTPClient:     downloads.Client(),
+		Stdout:         &out,
+		Stderr:         &stderr,
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		cosignPath:     fakeCosign(t, true),
+	})
+	if err != nil {
+		t.Fatalf("RunUpdate: %v\nstdout:\n%s\nstderr:\n%s", err, out.String(), stderr.String())
+	}
+	if !strings.Contains(out.String(), "updated fd0 to 0.9.0 standard") {
+		t.Fatalf("unexpected output:\n%s", out.String())
+	}
+}
+
 func TestRunUpdateInstallsVerifiedArchive(t *testing.T) {
 	archive := makeUpdateArchive(t, map[string]string{
 		"fd0":       "#!/bin/sh\necho fd0 0.9.0\n",
