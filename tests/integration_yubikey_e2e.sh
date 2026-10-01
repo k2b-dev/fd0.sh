@@ -105,8 +105,8 @@ trap cleanup EXIT
 
 # ─── Build fd0 + fd0-agent with the yubikey tag ───────────────────
 phase "build with -tags=yubikey"
-go build -tags=yubikey -o "$FD0"          ./cmd/fd0          || { no "build fd0";       exit 1; }
-go build -tags=yubikey -o "$FD0_AGENT"    ./cmd/fd0-agent    || { no "build fd0-agent"; exit 1; }
+go build -tags=yubikey -ldflags "$FD0_TEST_GO_LDFLAGS" -o "$FD0"          ./cmd/fd0          || { no "build fd0";       exit 1; }
+go build -tags=yubikey -ldflags "$FD0_TEST_GO_LDFLAGS" -o "$FD0_AGENT"    ./cmd/fd0-agent    || { no "build fd0-agent"; exit 1; }
 go build                -o "$FD0_SERVER_BIN"  ./cmd/fd0-server  || { no "build fd0-server"; exit 1; }
 go build                -o "$FD0_WITNESS_BIN" ./cmd/fd0-witness || { no "build fd0-witness"; exit 1; }
 ok "binaries built"

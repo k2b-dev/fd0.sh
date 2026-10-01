@@ -13,7 +13,9 @@ PROD_AGENT_SHA=
 snapshot_file() {
     local path=$1
     [ -e "$path" ] || return 0
-    stat -f '%i:%m:%z' "$path" 2>/dev/null || stat -c '%i:%Y:%s' "$path"
+    # GNU stat first: on Linux `stat -f` means file-system status and succeeds
+    # with unrelated, changing output, which made this guard always fail.
+    stat -c '%i:%Y:%s' "$path" 2>/dev/null || stat -f '%i:%m:%z' "$path"
 }
 
 snapshot_binary() {
@@ -57,6 +59,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Test binaries must never reach the hosted production server. The client
+# falls back to fdhome.DefaultServer when no server is configured, so every
+# test build replaces it with an unresolvable .invalid host (RFC 2606).
+TEST_DEFAULT_SERVER="http://default-server.fd0-test.invalid"
+TEST_GO_LDFLAGS="-X $(cd "$ROOT" && go list ./internal/fdhome).DefaultServer=$TEST_DEFAULT_SERVER"
+
 mkdir -p "$BUILD_BIN"
 for spec in \
     "fd0:./cmd/fd0" \
@@ -71,7 +79,11 @@ for spec in \
     "fd0-test-compact-scope-chain:./tests/helpers/compact_scope_chain"; do
     name=${spec%%:*}
     package=${spec#*:}
-    go build -o "$BUILD_BIN/$name" "$package"
+    go build -ldflags "$TEST_GO_LDFLAGS" -o "$BUILD_BIN/$name" "$package"
+done
+for name in fd0 fd0-agent fd0-desktop-bridge; do
+    grep -aqF "$TEST_DEFAULT_SERVER" "$BUILD_BIN/$name" \
+        || { printf 'integration isolation: %s does not carry the test default server\n' "$name" >&2; exit 1; }
 done
 
 if [ "$#" -eq 0 ]; then
@@ -112,6 +124,8 @@ for script in "$@"; do
         FD0_HOME="$test_home/.fd0" \
         FD0_SSH_SOCK="$case_root/fd0-ssh.sock" \
         FD0_SERVER= \
+        FD0_TEST_DEFAULT_SERVER="$TEST_DEFAULT_SERVER" \
+        FD0_TEST_GO_LDFLAGS="$TEST_GO_LDFLAGS" \
         FD0_AGENT_BIN="$test_bin/fd0-agent" \
         FD0="$test_bin/fd0" \
         FD0_AGENT="$test_bin/fd0-agent" \

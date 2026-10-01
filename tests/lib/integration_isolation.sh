@@ -26,6 +26,12 @@ fd0_test_require_isolation() {
         "$FD0_TEST_ROOT"/*) ;;
         *) fd0_test_isolation_error "FD0_SSH_SOCK is outside FD0_TEST_ROOT" ;;
     esac
+    case "${FD0_TEST_DEFAULT_SERVER:-}" in
+        *.invalid) ;;
+        *) fd0_test_isolation_error "test binaries must not fall back to the hosted server" ;;
+    esac
+    [ -n "${FD0_TEST_GO_LDFLAGS:-}" ] \
+        || fd0_test_isolation_error "FD0_TEST_GO_LDFLAGS is missing"
 }
 
 fd0_test_stop_agents() {

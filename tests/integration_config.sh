@@ -75,19 +75,21 @@ sleep 0.2
 
 # ─────────────────────────────────────────────────────────────────────────
 # D1. SYNC.SERVER precedence
-# Layers: CLI flag (--server) > env (FD0_SERVER) > config ([sync].server) > error
+# Layers: CLI flag (--server) > env (FD0_SERVER) > config ([sync].server) > built-in default
 # ─────────────────────────────────────────────────────────────────────────
-step "D1) sync server resolution: flag > env > config > error"
+step "D1) sync server resolution: flag > env > config > default"
 
-# D1a — error when nothing is set
+# D1a — the built-in default applies when nothing is set. Test builds point it
+# at an unresolvable host, so this must fail without contacting any server.
 write_cfg <<EOF
 [sync]
 on_unlock = false
 EOF
 OUT=$(env FD0_HOME="$HOME_DIR" FD0_SSH_SOCK="$HOME_DIR/ssh.sock" FD0_SERVER='' "$FD0" sync 2>&1 || true)
 case "$OUT" in
-    *"no server"*) ok "no-config + no-env + no-flag → clear error" ;;
-    *) no "expected 'no server' error, got: $OUT" ;;
+    *"sync ok"*) no "sync reached a server without any configuration: $OUT" ;;
+    *"$FD0_TEST_DEFAULT_SERVER"*|*"${FD0_TEST_DEFAULT_SERVER#http://}"*) ok "no-config + no-env + no-flag → built-in default" ;;
+    *) no "expected the built-in test default server, got: $OUT" ;;
 esac
 
 # D1b — config-only resolves
@@ -336,8 +338,8 @@ SP=14703
 SD7=$!
 sleep 0.3
 # 1st register attempt (curl with garbage body — tokens consumed regardless).
-C1=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SP}/users" -H "Content-Type: application/cbor" --data-binary "x")
-C2=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SP}/users" -H "Content-Type: application/cbor" --data-binary "x")
+C1=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SP}/v1/users" -H "Content-Type: application/cbor" --data-binary "x")
+C2=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SP}/v1/users" -H "Content-Type: application/cbor" --data-binary "x")
 case "$C1" in 400|201) ok "first register: HTTP $C1 (token consumed)" ;; *) no "C1=$C1" ;; esac
 [ "$C2" = "429" ] && ok "second register limited (429)" || no "C2=$C2 (expected 429)"
 kill $SD7 2>/dev/null

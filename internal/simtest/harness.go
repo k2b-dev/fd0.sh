@@ -31,10 +31,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/valentinkolb/fd0.sh/internal/fdhome"
 	"github.com/valentinkolb/fd0.sh/internal/server"
 )
 
@@ -154,7 +156,8 @@ func (h *Harness) build(name, pkg string) string {
 	h.t.Helper()
 	out := filepath.Join(h.dir, "bin", name)
 	// repoRoot: walk up from the test's working dir to the module root.
-	cmd := exec.Command("go", "build", "-o", out, pkg)
+	// Simulated clients must never fall back to the hosted server.
+	cmd := exec.Command("go", "build", "-ldflags", testDefaultServerLDFlag(), "-o", out, pkg)
 	cmd.Dir = repoRoot(h.t)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -162,6 +165,13 @@ func (h *Harness) build(name, pkg string) string {
 		h.t.Fatalf("build %s: %v\n%s", name, err, stderr.String())
 	}
 	return out
+}
+
+// testDefaultServerLDFlag points fdhome.DefaultServer at an unresolvable
+// .invalid host (RFC 2606) in every binary the harness builds.
+func testDefaultServerLDFlag() string {
+	pkg := reflect.TypeOf(fdhome.SyncConfig{}).PkgPath()
+	return "-X " + pkg + ".DefaultServer=http://default-server.fd0-test.invalid"
 }
 
 // startServer brings up one in-process fd0-server behind a fault gate.

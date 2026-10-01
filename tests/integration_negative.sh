@@ -226,8 +226,8 @@ mkdir -p "$SANDBOX" && chmod 700 "$SANDBOX"
 printf "x-pass\nx-pass\n" | env FD0_HOME="$SANDBOX" FD0_SSH_SOCK="$SANDBOX/ssh.sock" "$FD0" init >/dev/null 2>&1
 printf "x-pass\n" | env FD0_HOME="$SANDBOX" FD0_SSH_SOCK="$SANDBOX/ssh.sock" "$FD0" unlock >/dev/null 2>&1
 sleep 0.2
-expect_fail "env FD0_HOME='$SANDBOX' FD0_SSH_SOCK='$SANDBOX/ssh.sock' FD0_SERVER='' '$FD0' sync" "no server" \
-    "sync without server reports actionable error"
+expect_fail "env FD0_HOME='$SANDBOX' FD0_SSH_SOCK='$SANDBOX/ssh.sock' FD0_SERVER='' '$FD0' sync" "${FD0_TEST_DEFAULT_SERVER#http://}" \
+    "sync without server uses the built-in default and fails cleanly in tests"
 env FD0_HOME="$SANDBOX" FD0_SSH_SOCK="$SANDBOX/ssh.sock" "$FD0" lock >/dev/null 2>&1
 rm -rf "$SANDBOX"
 
@@ -377,12 +377,12 @@ DEFAULT=$(A get RAW_TEST --scope work)
 # A22. Vault & chain file permissions
 # ─────────────────────────────────────────────────────────────────────────
 step "A22) On-disk permissions are tight"
-PERMS=$(stat -f "%Lp" "$HOME_DIR/vault.enc" 2>/dev/null || stat -c "%a" "$HOME_DIR/vault.enc" 2>/dev/null)
+PERMS=$(stat -c "%a" "$HOME_DIR/vault.enc" 2>/dev/null || stat -f "%Lp" "$HOME_DIR/vault.enc" 2>/dev/null)
 [ "$PERMS" = "600" ] \
     && ok "vault.enc is 0600" \
     || no "vault.enc has loose perms: $PERMS"
 
-PERMS=$(stat -f "%Lp" "$HOME_DIR/chains/user.cbor" 2>/dev/null || stat -c "%a" "$HOME_DIR/chains/user.cbor" 2>/dev/null)
+PERMS=$(stat -c "%a" "$HOME_DIR/chains/user.cbor" 2>/dev/null || stat -f "%Lp" "$HOME_DIR/chains/user.cbor" 2>/dev/null)
 [ "$PERMS" = "600" ] || [ "$PERMS" = "644" ] \
     && ok "user.cbor is 0600 or 0644 (file is non-secret but encrypted-elsewhere)" \
     || no "user.cbor has loose perms: $PERMS"
@@ -391,7 +391,7 @@ PERMS=$(stat -f "%Lp" "$HOME_DIR/chains/user.cbor" 2>/dev/null || stat -c "%a" "
 # A23. Server: register with bad CBOR body
 # ─────────────────────────────────────────────────────────────────────────
 step "A23) Server rejects malformed register body"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/users" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/v1/users" \
     -H "Content-Type: application/cbor" --data-binary "not-cbor")
 case "$CODE" in
     400|401|409) ok "server rejects malformed register (HTTP $CODE)" ;;
@@ -402,7 +402,7 @@ esac
 # A24. Server: append without auth header
 # ─────────────────────────────────────────────────────────────────────────
 step "A24) Server rejects unauthenticated append"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/users/abc/events" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/v1/users/abc/events" \
     -H "Content-Type: application/cbor" --data-binary "x")
 [ "$CODE" = "401" ] \
     && ok "server rejects /users/.../events without auth (401)" \
@@ -412,7 +412,7 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER
 # A25. Server: sync without auth header
 # ─────────────────────────────────────────────────────────────────────────
 step "A25) Server rejects unauthenticated sync"
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/sync" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/v1/sync" \
     -H "Content-Type: application/cbor" --data-binary "x")
 [ "$CODE" = "401" ] \
     && ok "server rejects /sync without auth (401)" \
@@ -423,7 +423,7 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER
 # ─────────────────────────────────────────────────────────────────────────
 step "A26) Server rejects stale timestamps"
 # A request with ts=0 (1970) is way outside the 5-minute window.
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/sync" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${SERVER_PORT}/v1/sync" \
     -H "Content-Type: application/cbor" \
     -H "Authorization: fd0-sig v1 pk=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=, nonce=AAAAAAAAAAAAAAAAAAAAAA==, ts=0, sig=$(python3 -c 'print("A"*86)')=" \
     --data-binary "x")
@@ -441,7 +441,7 @@ step "A27) Server: /users/<unknown>/events auth-gates before existence check"
 # specific value (401 vs 404) is intentional; auth check fires
 # BEFORE the chain lookup so an attacker can't enumerate which
 # shortIds exist.
-CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${SERVER_PORT}/users/zzzzzzzz/events?latest=true")
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${SERVER_PORT}/v1/users/zzzzzzzz/events?latest=true")
 [ "$CODE" = "401" ] \
     && ok "GET /users/<unknown>/events → 401 (auth required, no enumeration leak)" \
     || no "GET /users/<unknown>/events → $CODE (expected 401)"
@@ -452,7 +452,7 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${SERVER_PORT}/u
 step "A28) Server rejects oversized body"
 # Default max-body is 8 MiB. Send 9 MiB.
 CODE=$(head -c $((9 * 1024 * 1024)) /dev/zero | curl -s -o /dev/null -w "%{http_code}" \
-    -X POST "http://127.0.0.1:${SERVER_PORT}/users" \
+    -X POST "http://127.0.0.1:${SERVER_PORT}/v1/users" \
     -H "Content-Type: application/cbor" --data-binary @-)
 case "$CODE" in
     400|413) ok "server rejects 9MiB body (HTTP $CODE)" ;;
