@@ -50,6 +50,7 @@ import {
 } from "./terminal-launcher";
 import { TerminalSessionManager, verifyTerminalRuntime } from "./terminal-session";
 import { SFTPBridgeClient } from "./sftp-bridge";
+import { pcscRuntimeEnvironment } from "./pcsc-runtime";
 import type {
   BridgeErrorShape,
   DesktopCommand,
@@ -195,9 +196,7 @@ function runtimeEnvironment(): NodeJS.ProcessEnv {
       FD0_SFTP_BRIDGE_BIN: join(process.resourcesPath, "bin", "fd0-sftp-bridge"),
       FD0_DESKTOP_MODE: "system",
       FD0_DESKTOP_VERSION: app.getVersion(),
-      ...(process.platform === "linux"
-        ? { LD_LIBRARY_PATH: join(process.resourcesPath, "runtime") }
-        : {}),
+      ...(process.platform === "linux" ? pcscRuntimeEnvironment(process.resourcesPath) : {}),
       ...(nativeAgentManaged ? { FD0_AGENT_MANAGED: "1" } : {}),
       ...(process.env.FD0_SSH_SOCK !== undefined ? { FD0_SSH_SOCK: process.env.FD0_SSH_SOCK } : {}),
     };

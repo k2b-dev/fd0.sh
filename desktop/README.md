@@ -122,9 +122,11 @@ The Electron test launches real temporary fd0 agents and vaults. It covers rende
 AppImage builds use electron-builder AppImage toolset `1.0.3`, whose static
 runtime does not require FUSE2. YubiKey builds link `fd0-agent` to
 `libpcsclite.so.1`; the AppImage bundles that library and its license so
-passphrase users do not need PC/SC packages. DEB and RPM keep native
-`libpcsclite1` or `pcsc-lite-libs` dependencies so their package managers own
-updates and removal.
+passphrase users do not need PC/SC packages. fd0 Desktop uses the bundled copy
+only when the host has no `libpcsclite.so.1`: the client library must match the
+host's `pcscd` protocol, so an installed host library always wins. DEB and RPM
+keep native `libpcsclite1` or `pcsc-lite-libs` dependencies so their package
+managers own updates and removal.
 
 The Linux release job records the complete `ldd` closure for `fd0-agent` on
 x64 and arm64 and fails on any unresolved library. Clean-machine jobs run the
