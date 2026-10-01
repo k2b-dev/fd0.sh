@@ -84,7 +84,7 @@ Map the user's intent to the right command before typing anything:
 | Import an existing SSH key | `fd0 key add NAME --import PATH` (encrypted RSA/ECDSA are refused — decrypt first) |
 | Show a public key for authorized_keys | `fd0 key show NAME --pub` |
 | Add an SSH host | `fd0 ssh add ALIAS [user@]host[:port] [--key NAME \| --with-key] [--jump ALIAS] [--tag T]` |
-| Connect to a host | `fd0 ssh ALIAS` (or bare `fd0 ssh` for the fuzzy picker) |
+| Connect to a host | `fd0 ssh ALIAS` (or bare `fd0 ssh` for the fuzzy picker). With a command or without a terminal, only the exact alias is accepted. |
 | Browse remote files interactively | `fd0 sftp ALIAS` |
 | List or inspect remote files | `fd0 sftp ls ALIAS [PATH] [--json]`; `fd0 sftp tree ALIAS [PATH] --depth N`; `fd0 sftp stat ALIAS PATH` |
 | Upload a file or directory | `fd0 sftp cp ALIAS LOCAL remote:PATH [--recursive] [--force]` |

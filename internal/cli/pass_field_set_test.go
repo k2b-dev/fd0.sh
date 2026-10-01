@@ -9,6 +9,7 @@ import (
 func TestPassFieldSetKeepsTypeAndRejectsEmptyStdin(t *testing.T) {
 	// In-process agent and test vault only; no installed binary or server.
 	isolation := shortTempDir(t)
+	t.Setenv("HOME", isolation)
 	t.Setenv("FD0_SSH_CONFIG_PATH", filepath.Join(isolation, "ssh.conf"))
 	t.Setenv("FD0_SSH_SOCK", filepath.Join(isolation, "ssh.sock"))
 	t.Setenv("FD0_AGENT_SYNC_DISABLED", "1")

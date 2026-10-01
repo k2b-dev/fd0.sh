@@ -64,16 +64,9 @@ func PrepareOpenSSHConnection(ctx context.Context, scopeID, name string) (OpenSS
 	if err != nil {
 		return OpenSSHConnection{}, err
 	}
-	host := exactMatch(hosts, name)
-	if host == nil {
-		prefixed := prefixMatch(hosts, name)
-		if len(prefixed) == 1 {
-			host = prefixed[0]
-		} else if len(prefixed) > 1 {
-			return OpenSSHConnection{}, fmt.Errorf("host alias %q is ambiguous", name)
-		} else {
-			return OpenSSHConnection{}, fmt.Errorf("no fd0 host matches %q", name)
-		}
+	host, err := resolveExactHost(s, hosts, name)
+	if err != nil {
+		return OpenSSHConnection{}, err
 	}
 	if err := renderSSHForConnect(s); err != nil {
 		return OpenSSHConnection{}, err
@@ -133,8 +126,28 @@ func RunSSHConnect(ctx context.Context, scopeID, name string, extra []string, an
 		return errors.New("no fd0-managed hosts; create one with `fd0 ssh add`")
 	}
 
-	// Fast paths.
+	// Commands and non-terminal callers get exact targets only: a typo or
+	// a stale alias must fail instead of running on another host.
+	interactive := len(extra) == 0 && IsTTY(os.Stdin) && IsTTY(os.Stderr)
+	if name != "" && !interactive {
+		host, err := resolveExactHost(s, hosts, name)
+		if err != nil {
+			s.Close()
+			return err
+		}
+		return renderAndExecSSH(s, host, extra)
+	}
+	if name == "" && !interactive {
+		s.Close()
+		return errors.New("host alias is required when running a command or without a terminal")
+	}
+
+	// Interactive fast paths.
 	if name != "" {
+		if _, err := resolveExactHost(s, hosts, name); err != nil && !errors.Is(err, errNoExactHost) {
+			s.Close()
+			return err
+		}
 		exact := exactMatch(hosts, name)
 		if exact != nil {
 			return renderAndExecSSH(s, exact, extra)
@@ -162,6 +175,42 @@ func RunSSHConnect(ctx context.Context, scopeID, name string, extra []string, an
 		return err
 	}
 	return renderAndExecSSH(s, h, extra)
+}
+
+var errNoExactHost = errors.New("no fd0 host has this exact alias")
+
+// resolveExactHost returns the host whose alias is exactly name. The
+// rendered SSH config keeps one block per alias, so an alias that exists in
+// several scopes cannot be connected to reliably and is refused, even when
+// the caller narrowed hosts with --scope.
+func resolveExactHost(s *Session, hosts []*sshhost.Host, name string) (*sshhost.Host, error) {
+	host := exactMatch(hosts, name)
+	all, err := loadHosts(s, "")
+	if err != nil {
+		return nil, err
+	}
+	var scopes []string
+	for _, h := range all {
+		if h.Alias == name {
+			scopes = append(scopes, scopeName(s, h.Scope))
+		}
+	}
+	if len(scopes) > 1 {
+		sort.Strings(scopes)
+		return nil, fmt.Errorf("host alias %q exists in several scopes (%s); rename one so SSH can resolve it unambiguously", name, strings.Join(scopes, ", "))
+	}
+	if host == nil {
+		if prefixed := prefixMatch(hosts, name); len(prefixed) > 0 {
+			aliases := make([]string, 0, len(prefixed))
+			for _, h := range prefixed {
+				aliases = append(aliases, h.Alias)
+			}
+			sort.Strings(aliases)
+			return nil, fmt.Errorf("%w: %q (did you mean %s?)", errNoExactHost, name, strings.Join(aliases, ", "))
+		}
+		return nil, fmt.Errorf("%w: %q", errNoExactHost, name)
+	}
+	return host, nil
 }
 
 // exactMatch looks for a host whose alias equals name (case-sensitive

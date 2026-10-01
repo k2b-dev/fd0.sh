@@ -19,8 +19,9 @@ fd0 sftp rm HOST REMOTE_PATH [--recursive] --yes
 ```
 
 `fd0 sftp HOST` opens the system's native interactive `sftp` client. Prefer
-the explicit subcommands for scripts and agent work. Every command accepts
-`--scope LABEL_OR_ID` when a host alias is ambiguous across scopes.
+the explicit subcommands for scripts and agent work. SFTP accepts exact host
+aliases only. An alias that exists in several scopes is refused, even with
+`--scope`, because the SSH config can only hold one host per alias; rename one.
 
 ## Copy operands
 
