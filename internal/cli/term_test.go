@@ -64,7 +64,9 @@ func TestInterruptedHiddenInputRestoresTerminal(t *testing.T) {
 func testInterruptedHiddenInputRestoresTerminal(t *testing.T, mode, prompt string) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestInterruptedHiddenInputRestoresTerminal$")
-	cmd.Env = append(os.Environ(), "FD0_TEST_HIDDEN_INPUT_INTERRUPT="+mode)
+	// CI=true stops the terminal-colour query at startup; outside CI its
+	// reply lands in the pty and the prompt never arrives.
+	cmd.Env = append(os.Environ(), "FD0_TEST_HIDDEN_INPUT_INTERRUPT="+mode, "CI=true")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatalf("start helper in pty: %v", err)
