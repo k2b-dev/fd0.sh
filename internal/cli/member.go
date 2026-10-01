@@ -41,6 +41,9 @@ func RunScopeAddMember(ctx context.Context, scopeID, memberCardOrLabel string) e
 	}
 	// Build current projection.
 	proj := projectionFromIndex(st.SecretIndex)
+	if err := s.requireAdmin(scopeID, st); err != nil {
+		return err
+	}
 	ev, newOEK, err := chain.BuildMemberChange(
 		s.Agent, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, st.CurrentOEKVer,
@@ -124,6 +127,9 @@ func removeScopeMember(s *Session, scopeID string, memberPub []byte, yes bool) e
 		return err
 	}
 	proj := projectionFromIndex(st.SecretIndex)
+	if err := s.requireAdmin(scopeID, st); err != nil {
+		return err
+	}
 	ev, newOEK, err := chain.BuildMemberChange(
 		s.Agent, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, st.CurrentOEKVer,
@@ -185,6 +191,29 @@ func RunScopeLeave(ctx context.Context, scopeID string, yes bool) error {
 	}
 	if err := confirmDanger(yes, fmt.Sprintf("Leave %s?", scopeName(s, scopeID))); err != nil {
 		return err
+	}
+	if role := st.Roles.RoleOf(s.UserSuperPub); role != proto.RoleAdmin {
+		// Only admins sign membership changes (docs/SCOPE_ROLES_PLAN.md).
+		// Hide the scope on this device; an admin removes the membership.
+		sd := s.Body.Scopes[scopeID]
+		sd.Leaving = true
+		s.Body.Scopes[scopeID] = sd
+		if err := s.ReSeal(); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "✓ %s hidden on this device; ask an admin to remove you (fd0 scope remove-member) so you stop receiving its keys\n", scopeName(nil, scopeID))
+		return nil
+	}
+	if len(st.MemberSet) > 1 {
+		admins := 0
+		for _, m := range st.MemberSet {
+			if st.Roles.RoleOf(m) == proto.RoleAdmin {
+				admins++
+			}
+		}
+		if admins == 1 {
+			return fmt.Errorf("you are the only admin of %s; make another member admin first (fd0 scope role CARD admin)", scopeName(s, scopeID))
+		}
 	}
 	// Build the event with op=remove, member=self.
 	proj := projectionFromIndex(st.SecretIndex)

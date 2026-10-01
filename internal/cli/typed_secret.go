@@ -160,6 +160,9 @@ func (s *Session) writeTypedSecretPayload(
 		ID:     sid,
 		Record: record,
 	}
+	if err := s.requireValueWrite(scopeID, st); err != nil {
+		return err
+	}
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
 	if err != nil {
@@ -326,6 +329,9 @@ func (s *Session) removeTypedSecret(ctx context.Context, scopeID, name, expected
 		}
 	}
 	body := &proto.SecretBody{ID: sid, Record: nil}
+	if err := s.requireValueWrite(scopeID, st); err != nil {
+		return err
+	}
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
 	if err != nil {

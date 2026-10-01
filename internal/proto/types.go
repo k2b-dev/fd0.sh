@@ -116,6 +116,9 @@ type Payload struct {
 	Op            string `cbor:"op,omitempty"`
 	Member        []byte `cbor:"member,omitempty"`
 	EncProjection []byte `cbor:"enc_projection,omitempty"`
+	// Role is the member's role on add or role ops; absent means admin
+	// and keeps legacy events byte-identical.
+	Role string `cbor:"role,omitempty"`
 	// secret.set
 	EncBody []byte `cbor:"enc_body,omitempty"`
 }

@@ -58,6 +58,15 @@ const (
 const (
 	OpAdd    = "add"
 	OpRemove = "remove"
+	// OpRole changes an existing member's role (docs/SCOPE_ROLES_PLAN.md).
+	OpRole = "role"
+)
+
+// Scope member roles. A member.change without a role means RoleAdmin.
+const (
+	RoleAdmin  = "admin"
+	RoleWriter = "writer"
+	RoleReader = "reader"
 )
 
 // AuthMethod types.

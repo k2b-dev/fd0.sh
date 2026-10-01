@@ -59,6 +59,9 @@ type ScopeState struct {
 	TipSeq        uint64
 	TipHash       []byte
 	Left          bool // true if a remove-self event was observed
+	// Roles holds non-admin member roles (docs/SCOPE_ROLES_PLAN.md);
+	// members without an entry are admins.
+	Roles proto.ScopeRoles
 }
 
 // ScopeSecret is one entry in secret_index.
@@ -182,8 +185,10 @@ func ReplayScopeEvents(
 			if !bytes.Equal(sp.PrevHash, prevHash) {
 				return nil, fmt.Errorf("%w: scope[%d] prev_hash mismatch", ErrScopeHistoryNonContiguous, i)
 			}
-			if !memberContains(st.MemberSet, sp.Author) {
-				return nil, fmt.Errorf("scope[%d]: author not in member set", i)
+			// Role rules apply to every event, including those before our
+			// own admission, so a server cannot make us accept them.
+			if err := proto.AuthorizeScopeEvent(sp, st.MemberSet, st.Roles); err != nil {
+				return nil, fmt.Errorf("scope[%d]: %w", i, err)
 			}
 		}
 		if !bytes.Equal(sp.Author, ev.Signature.SignerPubkey) {
@@ -323,6 +328,9 @@ func verifyScopeGenesis(ev *proto.ScopeEvent, st *ScopeState) error {
 	if !bytes.Equal(sp.Author, sp.Payload.Member) {
 		return errors.New("genesis author must equal member")
 	}
+	if err := proto.GenesisRole(sp); err != nil {
+		return err
+	}
 	prefix, err := ev.PrevHashInput()
 	if err != nil {
 		return err
@@ -366,8 +374,27 @@ func applyMemberChange(st *ScopeState, ev *proto.ScopeEvent, ownSuperPub, oekPla
 	if len(sp.KeyDeliveries) > proto.MaxKeyDeliveries {
 		return false, errors.New("member.change: too many key_deliveries")
 	}
-	if pl.Op != proto.OpAdd && pl.Op != proto.OpRemove {
+	if pl.Op != proto.OpAdd && pl.Op != proto.OpRemove && pl.Op != proto.OpRole {
 		return false, fmt.Errorf("member.change: bad op %q", pl.Op)
+	}
+	if len(pl.EncBody) != 0 {
+		return false, errors.New("member.change: enc_body must be empty")
+	}
+	if pl.Op == proto.OpRole {
+		// Membership and read access stay the same: no OEK rotation, no
+		// key deliveries, no projection. Authorization ran in the caller.
+		if sp.OEKVersion != st.CurrentOEKVer {
+			return false, fmt.Errorf("member.change role: oek_version=%d, want %d", sp.OEKVersion, st.CurrentOEKVer)
+		}
+		if len(sp.KeyDeliveries) != 0 || len(pl.EncProjection) != 0 || len(pl.EncBody) != 0 {
+			return false, errors.New("member.change role: key_deliveries, enc_projection and enc_body must be empty")
+		}
+		roles, err := proto.NextScopeRoles(st.Roles, st.MemberSet, sp)
+		if err != nil {
+			return false, err
+		}
+		st.Roles = roles
+		return false, nil
 	}
 	if len(pl.Member) != ed25519.PublicKeySize {
 		return false, fmt.Errorf(
@@ -400,6 +427,10 @@ func applyMemberChange(st *ScopeState, ev *proto.ScopeEvent, ownSuperPub, oekPla
 		}
 	}
 	want := postMutationSet(st.MemberSet, pl.Member, pl.Op)
+	nextRoles, err := proto.NextScopeRoles(st.Roles, want, sp)
+	if err != nil {
+		return false, err
+	}
 	if len(sp.KeyDeliveries) != len(want) {
 		return false, errors.New("member.change: key_deliveries don't match post-mutation set")
 	}
@@ -417,12 +448,14 @@ func applyMemberChange(st *ScopeState, ev *proto.ScopeEvent, ownSuperPub, oekPla
 	// Case 2: empty post-set (last member removed → tombstone scope).
 	if len(want) == 0 {
 		st.MemberSet = want
+		st.Roles = nextRoles
 		st.CurrentOEKVer = sp.OEKVersion
 		return false, nil
 	}
 	// Case 3: we have no key_delivery → pre-admit event during discovery.
 	if oekPlain == nil {
 		st.MemberSet = want
+		st.Roles = nextRoles
 		st.CurrentOEKVer = sp.OEKVersion
 		return false, nil
 	}
@@ -504,6 +537,7 @@ func applyMemberChange(st *ScopeState, ev *proto.ScopeEvent, ownSuperPub, oekPla
 	st.OEKs[sp.OEKVersion] = append([]byte(nil), oekPlain...)
 	st.CurrentOEKVer = sp.OEKVersion
 	st.MemberSet = want
+	st.Roles = nextRoles
 	st.SecretIndex = make(map[string]ScopeSecret, len(proj.Secrets))
 	for _, sec := range proj.Secrets {
 		if sec.Record == nil {
@@ -619,6 +653,7 @@ func ProjectionAAD(ev *proto.ScopeEvent) ([]byte, error) {
 	sp.Payload = proto.Payload{
 		Op:     ev.SignedPrefix.Payload.Op,
 		Member: ev.SignedPrefix.Payload.Member,
+		Role:   ev.SignedPrefix.Payload.Role, // omitted for legacy events
 	}
 	body, err := proto.Marshal(sp)
 	if err != nil {

@@ -65,6 +65,9 @@ func (s *Session) writeScopeMeta(scopeID string, fields map[string]string) error
 		Record: preservedRecord(current.Record, MetaSecretName, MetaSecretType, merged),
 	}
 
+	if err := s.requireValueWrite(scopeID, st); err != nil {
+		return err
+	}
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub, proto.MustParseScopeID(scopeID),
 		st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
 	if err != nil {
