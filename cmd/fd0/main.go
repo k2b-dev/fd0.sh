@@ -50,6 +50,7 @@ type rootCLI struct {
 	Talos    talosCmd    `cmd:"" help:"Manage Talos Linux contexts + secrets.yaml DR bundles."`
 	Kube     kubeCmd     `cmd:"" help:"Manage Kubernetes kubeconfig clusters (Talos, EKS, GKE, AKS, …)."`
 	Service  serviceCmd  `cmd:"" help:"Manage credentials that programs consume (env files, Kubernetes Secrets)."`
+	Run      runCmd      `cmd:"" help:"Run a command with a service's env-named fields in its environment."`
 	Version  versionCmd  `cmd:"" help:"Print version and exit."`
 	Update   updateCmd   `cmd:"" help:"Update fd0 and fd0-agent from the latest client release."`
 
@@ -695,6 +696,12 @@ type serviceCmd struct {
 	Move      serviceMoveCmd      `cmd:"" help:"Move a service between scopes."`
 	History   itemHistoryCmd      `cmd:"" help:"Show or restore earlier versions of a service."`
 }
+type runCmd struct {
+	Service string   `name:"service" required:"" help:"Service whose fields are added to the environment."`
+	Fields  []string `name:"field" help:"Only these fields (repeatable). Default: all fields with env names."`
+	Scope   string   `name:"scope" help:"Scope label or id."`
+	Command []string `arg:"" passthrough:"" help:"Command and arguments, after --."`
+}
 type serviceAddCmd struct {
 	Name        string   `arg:"" help:"Service name."`
 	Scope       string   `name:"scope" help:"Scope label or id."`
@@ -1172,6 +1179,7 @@ func commandNeedsUnlockedVault(command string) bool {
 		"service history restore <name> <seq>",
 		"service add <name>", "service set <name>", "service set <name> <field>", "service set <name> <field> <value>",
 		"service get <name> <field>", "service unset <name> <field>", "service env <name>", "service k8s-secret <name>",
+		"run <command>",
 		"service edit <name>", "service list", "service ls", "service show <name>",
 		"service rename <name> <new-name>", "service rm <name>", "service move <name>",
 		"talos history <name>", "talos history show <name>",
@@ -1518,6 +1526,8 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		return cli.RunServiceGet(ctx, c.Service.Get.Scope, c.Service.Get.Name, c.Service.Get.Field, c.Service.Get.Raw)
 	case "service unset <name> <field>":
 		return cli.RunServiceFieldRemove(ctx, c.Service.Unset.Scope, c.Service.Unset.Name, c.Service.Unset.Field, c.Service.Unset.Yes)
+	case "run <command>":
+		return cli.RunServiceExec(ctx, c.Run.Scope, c.Run.Service, c.Run.Fields, c.Run.Command)
 	case "service env <name>":
 		return cli.RunServiceEnv(ctx, c.Service.Env.Scope, c.Service.Env.Name, c.Service.Env.Fields, c.Service.Env.Format)
 	case "service k8s-secret <name>":

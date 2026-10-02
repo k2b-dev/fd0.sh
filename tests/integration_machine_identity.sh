@@ -97,6 +97,9 @@ try:
     run(machine, 'sync')
     env_out = run(machine, 'service', 'env', 'app', '--format', 'docker-env', '--scope', 'ci-deploy').stdout
     assert env_out == 'APP_TOKEN=MACHINE_IDENTITY_CANARY\n', env_out
+    # fd0 run hands the value to a command's environment and keeps its exit status.
+    ran = run(machine, 'run', '--service', 'app', '--scope', 'ci-deploy', '--', 'sh', '-c', 'printf %s "$APP_TOKEN"; exit 7', success=False)
+    assert ran.returncode == 7 and ran.stdout == 'MACHINE_IDENTITY_CANARY', (ran.returncode, ran.stderr)
     members = run(person, 'scope', 'members', 'ci-deploy').stdout
     assert 'reader' in members and 'admin' in members, members
 

@@ -36,6 +36,26 @@ func RenderEnv(fields []Field, dialect string) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// ExecEnv returns KEY=VALUE entries for a process environment. Values are
+// passed unescaped; only NUL bytes, which an environment cannot hold, are
+// rejected.
+func ExecEnv(fields []Field) ([]string, error) {
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f.Type == FieldFile {
+			return nil, fmt.Errorf("service: file field %q cannot be passed as an environment variable", f.Name)
+		}
+		if f.Env == "" {
+			return nil, fmt.Errorf("service: field %q has no env name; set one with --env", f.Name)
+		}
+		if strings.IndexByte(f.Value, 0) >= 0 {
+			return nil, fmt.Errorf("service: field %q contains a NUL byte, which an environment variable cannot hold", f.Name)
+		}
+		out = append(out, f.Env+"="+f.Value)
+	}
+	return out, nil
+}
+
 func envLine(key, value, dialect string) (string, error) {
 	switch dialect {
 	case DialectSystemd:

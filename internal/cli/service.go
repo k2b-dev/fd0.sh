@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/valentinkolb/fd0.sh/internal/service"
 )
@@ -458,6 +460,62 @@ func RunServiceEnv(ctx context.Context, scopeID, name string, fields []string, d
 	}
 	_, err = os.Stdout.Write(out)
 	return err
+}
+
+// RunServiceExec replaces fd0 with command, adding the selected fields to
+// the environment (docs/SERVICES_PLAN.md, phase 2). The vault lock is
+// released first; signals and the exit status belong to the command.
+func RunServiceExec(ctx context.Context, scopeID, name string, fields []string, command []string) error {
+	if len(command) > 0 && command[0] == "--" {
+		command = command[1:]
+	}
+	if len(command) == 0 {
+		return errors.New("run: missing command after --")
+	}
+	bin, err := exec.LookPath(command[0])
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+	add, err := serviceRunEnv(ctx, scopeID, name, fields)
+	if err != nil {
+		return err
+	}
+	return syscall.Exec(bin, command, mergeEnv(os.Environ(), add))
+}
+
+// serviceRunEnv returns the KEY=VALUE entries fd0 run adds; the session and
+// its lock are closed before it returns.
+func serviceRunEnv(ctx context.Context, scopeID, name string, fields []string) ([]string, error) {
+	s, _, svc, err := openService(ctx, scopeID, name)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	selected, err := svc.Select(fields)
+	if err != nil {
+		return nil, err
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("run: %q has no fields with env names", name)
+	}
+	return service.ExecEnv(selected)
+}
+
+// mergeEnv returns base with every variable in add set, replacing earlier
+// values of the same name.
+func mergeEnv(base, add []string) []string {
+	names := make(map[string]bool, len(add))
+	for _, kv := range add {
+		names[kv[:strings.IndexByte(kv, '=')]] = true
+	}
+	out := make([]string, 0, len(base)+len(add))
+	for _, kv := range base {
+		if i := strings.IndexByte(kv, '='); i > 0 && names[kv[:i]] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, add...)
 }
 
 // RunServiceK8sSecret renders an Opaque Secret manifest.

@@ -180,3 +180,42 @@ func TestServiceRestoreRestampsFields(t *testing.T) {
 		}
 	})
 }
+
+func TestServiceRunEnv(t *testing.T) {
+	dir := serviceTestEnv(t)
+	ctx, scope := newTestVault(t)
+	if err := RunServiceAdd(ctx, ServiceAddOpts{Name: "app", Scope: scope}); err != nil {
+		t.Fatal(err)
+	}
+	set := func(field, typ, env, value string) {
+		t.Helper()
+		var err error
+		withStdio(t, dir, value, func() {
+			err = RunServiceSet(ctx, ServiceSetOpts{Name: "app", Scope: scope, Field: field, Type: typ, Env: env})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("token", "", "APP_TOKEN", "line one\nline two $HOME")
+	set("region", "text", "APP_REGION", "eu")
+	set("ca.crt", "file", "", "-----BEGIN-----")
+
+	env, err := serviceRunEnv(ctx, scope, "app", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(env, "|") != "APP_TOKEN=line one\nline two $HOME|APP_REGION=eu" {
+		t.Fatalf("default fields: %q", env)
+	}
+	if env, err = serviceRunEnv(ctx, scope, "app", []string{"region"}); err != nil || len(env) != 1 || env[0] != "APP_REGION=eu" {
+		t.Fatalf("selected field: %q %v", env, err)
+	}
+	if _, err := serviceRunEnv(ctx, scope, "app", []string{"ca.crt"}); err == nil {
+		t.Fatal("file field passed as an environment variable")
+	}
+	merged := mergeEnv([]string{"PATH=/bin", "APP_REGION=us", "A=1"}, []string{"APP_REGION=eu"})
+	if strings.Join(merged, "|") != "PATH=/bin|A=1|APP_REGION=eu" {
+		t.Fatalf("merge: %q", merged)
+	}
+}

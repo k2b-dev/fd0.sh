@@ -174,3 +174,17 @@ func TestParseEnvFile(t *testing.T) {
 		t.Fatal("field name derivation")
 	}
 }
+
+func TestExecEnv(t *testing.T) {
+	var s Service
+	_, _ = s.Set("token", "", []byte("multi\nline"), "TOKEN", now)
+	_, _ = s.Set("bin", "", []byte("a\x00b"), "BIN", now)
+	ok, _ := s.Select([]string{"token"})
+	if env, err := ExecEnv(ok); err != nil || len(env) != 1 || env[0] != "TOKEN=multi\nline" {
+		t.Fatalf("exec env: %q %v", env, err)
+	}
+	nul, _ := s.Select([]string{"bin"})
+	if _, err := ExecEnv(nul); err == nil {
+		t.Fatal("NUL byte accepted")
+	}
+}

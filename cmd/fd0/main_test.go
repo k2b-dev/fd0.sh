@@ -87,3 +87,21 @@ func TestSFTPCommandsParseApprovedSurface(t *testing.T) {
 		})
 	}
 }
+
+func TestRunParsesCommandAndNeedsUnlock(t *testing.T) {
+	var command rootCLI
+	parser, err := kong.New(&command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := parser.Parse([]string{"run", "--service", "app", "--field", "token", "--", "sh", "-c", "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := context.Command(); got != "run <command>" || !commandNeedsUnlockedVault(got) {
+		t.Fatalf("command=%q needsUnlock=%v", got, commandNeedsUnlockedVault(got))
+	}
+	if command.Run.Service != "app" || len(command.Run.Fields) != 1 || command.Run.Command[len(command.Run.Command)-1] != "true" {
+		t.Fatalf("parsed %+v", command.Run)
+	}
+}

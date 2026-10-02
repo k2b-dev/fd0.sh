@@ -342,7 +342,10 @@ fd0 service show pg-1                                # secrets and files stay ma
 fd0 service env pg-1 --format systemd-env | ssh host 'sudo install -m 600 /dev/stdin /etc/app.env'
 fd0 service k8s-secret pg-1 -n app --name runtime --key postgres-password=DATABASE_PASSWORD \
   | kubectl apply --server-side --field-manager=fd0-pg-1 -f -
+fd0 run --service pg-1 -- ./migrate.sh               # env-named fields as environment variables
 ```
+
+`fd0 run --service NAME [--field F] -- COMMAND` replaces fd0 with the command, adding the selected env-named `secret` and `text` fields to its environment; the command's exit status and signals are its own. The environment is readable by processes of the same user and inherited by child processes, so prefer it for short-lived commands.
 
 Values are accepted only from stdin (`-`), never as arguments. `env` dialects are `systemd-env`, `docker-env` and `sh`; pick the one the consumer parses. Rendering commands refuse a terminal, which prevents accidents but is not a boundary: an agent moving values should only pipe them between commands and verify with `cmp -s <(…) <(…)`, never print them.
 

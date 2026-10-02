@@ -1,6 +1,6 @@
 # Services plan
 
-Status: draft for review, 2026-10-01. Revised after code, security and use-case reviews. Not implemented.
+Status: phase 1 implemented 2026-10-01, phase 2 implemented 2026-10-02; phase 3 not started.
 
 ## Outcome and scope
 
@@ -56,7 +56,7 @@ Compatibility: clients before this release do not know the `service:` prefix and
 
 ## Phase 2: `fd0 run`
 
-`fd0 run --service NAME [--fields a,b] -- COMMAND ...` starts the command with the selected fields as environment variables and returns its exit status. The usual caveat applies: the environment is readable by the same user and inherited by child processes.
+`fd0 run --service NAME [--field F ...] -- COMMAND ...` replaces fd0 with the command (exec), adding the selected env-named fields to its environment, so the exit status and signals are the command's own. The usual caveat applies: the environment is readable by the same user and inherited by child processes.
 
 ## Phase 3: approved consumers, deploy and check
 
