@@ -1,7 +1,7 @@
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createReadStream } from "node:fs";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, createReadStream } from "node:fs";
+import { access, chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
@@ -296,6 +296,14 @@ function publishUpdate(status: UpdateStatus): void {
   mainWindow?.webContents.send("desktop:update", status);
 }
 
+/** Shows the updater's own error text, redacted, instead of a generic summary. */
+function publishUpdaterError(summary: string, error: unknown): void {
+  console.error(`fd0 updater: ${summary}`, error);
+  diagnostics?.record("updater", "error", error);
+  const detail = error instanceof Error && error.message ? `: ${redactDiagnosticText(error.message).slice(0, 300)}` : ".";
+  publishUpdate({ state: "error", version: updateState.version, message: `${summary}${detail}` });
+}
+
 function showAppMessageBox(options: MessageBoxOptions) {
   return mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options);
 }
@@ -308,7 +316,7 @@ function flushDesktopUpdateRequest(): void {
   rendererDesktopUpdateRequested = true;
   showMainWindow();
   sendCommand("open-support");
-  void checkForUpdates();
+  void checkForUpdates(true);
 }
 
 function requestDesktopUpdate(): void {
@@ -317,7 +325,7 @@ function requestDesktopUpdate(): void {
   flushDesktopUpdateRequest();
 }
 
-async function checkForUpdates(): Promise<UpdateStatus> {
+async function checkForUpdates(manual = false): Promise<UpdateStatus> {
   if (!app.isPackaged) return updateState;
   selectedUpdateRelease = null;
   publishUpdate({ state: "checking" });
@@ -328,14 +336,98 @@ async function checkForUpdates(): Promise<UpdateStatus> {
       publishUpdate({ state: "current", version: app.getVersion() });
       return updateState;
     }
+    const blocker = await macUpdateBlocker();
+    if (blocker) {
+      publishUpdate({ state: "error", version: release.version, message: blocker });
+      offerMoveToApplications(release.version);
+      return updateState;
+    }
+    if (failedInstallVersion === release.version && !manual) {
+      // The last attempt to install exactly this version did not take; do
+      // not prompt again on every launch. Support can still retry.
+      publishUpdate({ state: "error", version: release.version, message: `fd0 ${release.version} was downloaded but could not be installed. See Support for details.` });
+      return updateState;
+    }
     selectedUpdateRelease = release;
     autoUpdater.setFeedURL({ provider: "generic", url: release.feedURL });
     await autoUpdater.checkForUpdates();
   } catch (error) {
-    console.error("fd0 update check failed", error);
-    publishUpdate({ state: "error", message: "Could not check for updates." });
+    publishUpdaterError("Could not check for updates", error);
   }
   return updateState;
+}
+
+/** Squirrel replaces the running bundle in place; it silently fails when it cannot. */
+function macAppBundle(): string {
+  return resolve(dirname(process.execPath), "..", "..");
+}
+
+async function macUpdateBlocker(): Promise<string | null> {
+  if (process.platform !== "darwin") return null;
+  if (!app.isInApplicationsFolder()) {
+    return "fd0 can only update itself from the Applications folder. Move fd0 to Applications and open it from there.";
+  }
+  const bundle = macAppBundle();
+  try {
+    await access(bundle, fsConstants.W_OK);
+    await access(dirname(bundle), fsConstants.W_OK);
+  } catch {
+    return `fd0 cannot replace itself because ${bundle} is not writable by your user. Reinstall fd0 into Applications as your user.`;
+  }
+  return null;
+}
+
+let moveOffered = false;
+function offerMoveToApplications(version: string): void {
+  if (moveOffered || process.platform !== "darwin" || app.isInApplicationsFolder()) return;
+  moveOffered = true;
+  void showAppMessageBox({
+    type: "info",
+    buttons: ["Move to Applications", "Later"],
+    defaultId: 0,
+    cancelId: 1,
+    title: "Move fd0 to Applications",
+    message: `fd0 ${version} is available, but this copy of fd0 cannot update itself.`,
+    detail: `fd0 is running from ${macAppBundle()}. Updates only work from the Applications folder. If another copy of fd0 is already there, it is replaced.`,
+    noLink: true,
+  }).then((answer) => {
+    if (answer.response !== 0) return;
+    try {
+      app.moveToApplicationsFolder();
+    } catch (error) {
+      diagnostics?.record("updater", "move-failed", error);
+      publishUpdate({ state: "error", message: "Could not move fd0 to Applications. Drag it there in Finder." });
+    }
+  });
+}
+
+// Records which version an install attempt targeted, so the next launch can
+// tell a successful install from one that silently failed.
+const pendingInstallFile = () => join(app.getPath("userData"), "pending-update.json");
+let failedInstallVersion: string | null = null;
+
+async function checkPreviousInstall(): Promise<void> {
+  let version: string;
+  try {
+    version = String(JSON.parse(await readFile(pendingInstallFile(), "utf8")).version ?? "");
+  } catch {
+    return;
+  }
+  let reached = true;
+  try {
+    reached = !version || compareSemver(version, app.getVersion()) <= 0;
+  } catch {
+    // An unreadable version cannot be compared; drop the marker.
+  }
+  if (reached) {
+    await rm(pendingInstallFile(), { force: true });
+    return;
+  }
+  // Keep the marker until the app actually reaches this version, so the
+  // automatic prompt stays off across launches. A manual check retries.
+  failedInstallVersion = version;
+  diagnostics?.record("updater", "install-not-applied", `expected ${version}, running ${app.getVersion()} from ${process.platform === "darwin" ? macAppBundle() : process.execPath}`);
+  publishUpdate({ state: "error", version, message: `fd0 ${version} was downloaded but could not be installed. See Support for details.` });
 }
 
 async function resolveDesktopUpdateRelease(): Promise<DesktopRelease> {
@@ -449,10 +541,7 @@ function announceDownloadedUpdate(version: string): void {
     noLink: true,
   }).then((answer) => {
     if (answer.response === 0) {
-      void installReadyUpdate().catch((error) => {
-        console.error("fd0 update install failed", error);
-        publishUpdate({ state: "error", message: "Could not prepare fd0 for the update." });
-      });
+      void installReadyUpdate().catch((error) => publishUpdaterError("Could not prepare fd0 for the update", error));
     }
   });
 }
@@ -465,6 +554,7 @@ function configureUpdater(): void {
   autoUpdater.allowPrerelease = app.getVersion().includes("-");
   if (process.platform === "darwin") autoUpdater.channel = process.arch;
   autoUpdater.allowDowngrade = false;
+  void checkPreviousInstall();
   autoUpdater.on("checking-for-update", () => publishUpdate({ state: "checking" }));
   autoUpdater.on("update-not-available", () => publishUpdate({ state: "current", version: app.getVersion() }));
   autoUpdater.on("update-available", (info) => {
@@ -485,10 +575,7 @@ function configureUpdater(): void {
     }).then((answer) => {
       if (answer.response !== 0) return;
       publishUpdate({ state: "downloading", version: info.version, progress: 0 });
-      void autoUpdater.downloadUpdate().catch((error) => {
-        console.error("fd0 update download failed", error);
-        publishUpdate({ state: "error", message: "Could not download the update." });
-      });
+      void autoUpdater.downloadUpdate().catch((error) => publishUpdaterError("Could not download the update", error));
     });
   });
   autoUpdater.on("download-progress", (progress) => {
@@ -505,10 +592,7 @@ function configureUpdater(): void {
         });
       });
   });
-  autoUpdater.on("error", (error) => {
-    console.error("fd0 updater error", error);
-    publishUpdate({ state: "error", message: "The updater encountered an error." });
-  });
+  autoUpdater.on("error", (error) => publishUpdaterError("The updater encountered an error", error));
   updateTimer = setTimeout(() => {
     void checkForUpdates();
     updateTimer = setInterval(() => void checkForUpdates(), 6 * 60 * 60_000);
@@ -519,7 +603,9 @@ async function installReadyUpdate(): Promise<void> {
   if (updateState.state !== "ready") throw new Error("No downloaded fd0 update is ready to install");
   if (installingUpdate) return;
   installingUpdate = true;
+  const version = updateState.version;
   try {
+    if (version) await writeFile(pendingInstallFile(), JSON.stringify({ version }), { mode: 0o600 });
     if (nativeAgentManaged) {
       await agentLifecycle.stop();
     } else if (bridge) {
@@ -528,6 +614,7 @@ async function installReadyUpdate(): Promise<void> {
     setTimeout(() => autoUpdater.quitAndInstall(false, true), 100);
   } catch (error) {
     installingUpdate = false;
+    if (version) await rm(pendingInstallFile(), { force: true }).catch(() => undefined);
     throw error;
   }
 }
@@ -1943,7 +2030,7 @@ function registerIPC(client: BridgeSupervisor): void {
     await shell.openExternal(supportLink(target));
   });
   handle("fd0:update-status", async () => updateState);
-  handle("fd0:check-updates", () => checkForUpdates());
+  handle("fd0:check-updates", () => checkForUpdates(true));
   handle("fd0:install-update", async () => {
     await installReadyUpdate();
   });
@@ -1962,6 +2049,13 @@ function registerIPC(client: BridgeSupervisor): void {
 async function ensureManagedAgent(client: BridgeSupervisor): Promise<void> {
   if (!nativeAgentManaged) return;
   let status = await client.request<VaultStatus>("vault.status", {});
+  if (usableAgent(status) && staleDesktopAgent(status) && !staleAgentRestarted) {
+    staleAgentRestarted = true;
+    // A service this app registered but from another bundle version, e.g. a
+    // registration left behind by an older copy of fd0. Replace it.
+    diagnostics?.record("agent", `stale-version:${status.version}`);
+    status = await restartManagedAgent(client);
+  }
   if (usableAgent(status)) return;
   if (status.agentRunning) {
     // Running but unusable. Ours to restart — or someone else's to leave alone.
@@ -2015,6 +2109,14 @@ async function waitForAgentStatus(
   }
   if (ready(status)) return status;
   throw new Error(failureMessage ?? agentBlockedMessage(status));
+}
+
+// Restart a stale agent at most once per app run; a registration that keeps
+// pointing at another bundle must not lock the vault on every activation.
+let staleAgentRestarted = false;
+
+function staleDesktopAgent(status: VaultStatus): boolean {
+  return status.agentStartedBy === "desktop" && Boolean(status.version && status.expectedVersion) && status.version !== status.expectedVersion;
 }
 
 function usableAgent(status: VaultStatus): boolean {
