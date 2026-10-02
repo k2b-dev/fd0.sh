@@ -618,11 +618,22 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 		var params struct {
 			ScopeID string `json:"scopeId"`
 			Label   string `json:"label"`
+			Role    string `json:"role"`
 		}
 		if err := decodeParams(raw, &params); err != nil {
 			return nil, err
 		}
-		return s.addScopeMember(ctx, params.ScopeID, params.Label)
+		return s.addScopeMember(ctx, params.ScopeID, params.Label, params.Role)
+	case "scope.setMemberRole":
+		var params struct {
+			ScopeID  string `json:"scopeId"`
+			MemberID string `json:"memberId"`
+			Role     string `json:"role"`
+		}
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.setScopeMemberRole(ctx, params.ScopeID, params.MemberID, params.Role)
 	case "scope.removeMember":
 		var params struct {
 			ScopeID  string `json:"scopeId"`

@@ -45,11 +45,41 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{db: db}
+	if err := store.ensureGeneration(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := store.ensureScopeMemberIndex(context.Background()); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("scope member index: %w", err)
 	}
 	return store, nil
+}
+
+// storeGeneration is raised when stored data gains meaning an older server
+// would silently drop. Generation 2: scope metadata may carry member roles
+// (docs/SCOPE_ROLES_PLAN.md); an older server would forget them and accept
+// writes that clients reject. Servers refuse databases of a newer generation.
+const storeGeneration = 2
+
+func (s *Store) ensureGeneration(ctx context.Context) error {
+	var stored int
+	err := s.db.QueryRowContext(ctx, `SELECT CAST(value AS INTEGER) FROM schema_state WHERE key = 'store_generation'`).Scan(&stored)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read store generation: %w", err)
+	}
+	if stored > storeGeneration {
+		return fmt.Errorf("database was written by a newer fd0-server (store generation %d > %d); downgrading is not supported", stored, storeGeneration)
+	}
+	if stored == storeGeneration {
+		return nil
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO schema_state (key, value) VALUES ('store_generation', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, fmt.Sprint(storeGeneration))
+	if err != nil {
+		return fmt.Errorf("write store generation: %w", err)
+	}
+	return nil
 }
 
 // Close releases the underlying DB.

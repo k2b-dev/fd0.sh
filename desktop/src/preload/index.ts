@@ -18,6 +18,7 @@ import type {
   SaveSecretInput,
   SaveSSHHostInput,
   SaveSSHKeyInput,
+  ScopeRole,
   StartupStatus,
   SFTPEntry,
   SFTPPreview,
@@ -111,7 +112,9 @@ const api: DesktopAPI = {
   renameScope: (scopeId: string, label: string) => invoke("fd0:rename-scope", scopeId, label),
   leaveScope: (scopeId: string) => invoke("fd0:leave-scope", scopeId),
   scopeShareInfo: (scopeId: string) => invoke("fd0:scope-share-info", scopeId),
-  addScopeMember: (scopeId: string, label: string) => invoke("fd0:scope-add-member", scopeId, label),
+  addScopeMember: (scopeId: string, label: string, role?: ScopeRole) => invoke("fd0:scope-add-member", scopeId, label, role ?? ""),
+  setScopeMemberRole: (scopeId: string, memberId: string, role: ScopeRole) =>
+    invoke("fd0:scope-set-member-role", scopeId, memberId, role),
   removeScopeMember: (scopeId: string, memberId: string) => invoke("fd0:scope-remove-member", scopeId, memberId),
   exportIdentityCard: () => invoke("fd0:card-export"),
   inspectIdentityCard: (url: string) => invoke("fd0:card-inspect", url),

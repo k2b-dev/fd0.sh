@@ -71,12 +71,17 @@ export type ScopeMember = {
   fingerprint: string;
   self?: boolean;
   trusted?: boolean;
+  role: ScopeRole;
 };
+
+/** admin: values and membership; writer: values; reader: read only. */
+export type ScopeRole = "admin" | "writer" | "reader";
 
 export type ScopeShareInfo = {
   scopeLabel: string;
   contacts: TrustedContact[];
   members: ScopeMember[];
+  selfRole: ScopeRole;
 };
 
 export type IdentityCardInfo = {
@@ -547,9 +552,11 @@ export type DesktopAPI = {
   restoreDeletedItem(ref: ItemVersionRef): Promise<{ ok: boolean }>;
   createScope(label: string): Promise<{ ok: boolean }>;
   renameScope(scopeId: string, label: string): Promise<{ ok: boolean }>;
-  leaveScope(scopeId: string): Promise<{ ok: boolean }>;
+  /** hidden: a non-admin hid the vault on this device but stays a member. */
+  leaveScope(scopeId: string): Promise<{ ok: boolean; hidden?: boolean }>;
   scopeShareInfo(scopeId: string): Promise<ScopeShareInfo>;
-  addScopeMember(scopeId: string, label: string): Promise<{ ok: boolean }>;
+  addScopeMember(scopeId: string, label: string, role?: ScopeRole): Promise<{ ok: boolean }>;
+  setScopeMemberRole(scopeId: string, memberId: string, role: ScopeRole): Promise<{ ok: boolean }>;
   removeScopeMember(scopeId: string, memberId: string): Promise<{ ok: boolean }>;
   exportIdentityCard(): Promise<IdentityCardInfo>;
   inspectIdentityCard(url: string): Promise<IdentityCardInfo>;

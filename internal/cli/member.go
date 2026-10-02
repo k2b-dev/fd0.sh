@@ -16,7 +16,12 @@ import (
 // RunScopeAddMember adds the holder of memberCardOrLabel to scopeID. The
 // argument is either a card URL (`fd0://card/...`) or a pinned-identity
 // label (see `fd0 card import`). Rotates the OEK on accept.
-func RunScopeAddMember(ctx context.Context, scopeID, memberCardOrLabel string) error {
+// RunScopeAddMember adds a member. An empty role keeps the legacy wire form,
+// which makes the member an admin.
+func RunScopeAddMember(ctx context.Context, scopeID, memberCardOrLabel, role string) error {
+	if role != "" && !proto.ValidRole(role) {
+		return fmt.Errorf("invalid role %q (use admin, writer or reader)", role)
+	}
 	s, err := Open(ctx)
 	if err != nil {
 		return err
@@ -41,10 +46,23 @@ func RunScopeAddMember(ctx context.Context, scopeID, memberCardOrLabel string) e
 	}
 	// Build current projection.
 	proj := projectionFromIndex(st.SecretIndex)
-	ev, newOEK, err := chain.BuildMemberChange(
+	if err := s.requireAdmin(scopeID, st); err != nil {
+		return err
+	}
+	// Admin is the absent role: keep legacy bytes so older servers and
+	// clients accept ordinary sharing.
+	if role == proto.RoleAdmin {
+		role = ""
+	}
+	if role != "" {
+		if err := s.requireScopeRolesSupport(ctx); err != nil {
+			return err
+		}
+	}
+	ev, newOEK, err := chain.BuildMemberChangeWithRole(
 		s.Agent, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, st.CurrentOEKVer,
-		proto.OpAdd, memberPub, st.MemberSet, proj,
+		proto.OpAdd, memberPub, role, st.MemberSet, proj,
 	)
 	if err != nil {
 		return err
@@ -61,8 +79,12 @@ func RunScopeAddMember(ctx context.Context, scopeID, memberCardOrLabel string) e
 	if err := s.ReSeal(); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "✓ added %s to %s (oek=v%d)\n",
-		memberDisplay(s, memberPub), scopeName(s, scopeID), ev.SignedPrefix.OEKVersion)
+	shown := role
+	if shown == "" {
+		shown = proto.RoleAdmin
+	}
+	fmt.Fprintf(os.Stderr, "✓ added %s to %s as %s (oek=v%d)\n",
+		memberDisplay(s, memberPub), scopeName(s, scopeID), shown, ev.SignedPrefix.OEKVersion)
 	hintSyncForPeers()
 	return nil
 }
@@ -124,6 +146,9 @@ func removeScopeMember(s *Session, scopeID string, memberPub []byte, yes bool) e
 		return err
 	}
 	proj := projectionFromIndex(st.SecretIndex)
+	if err := s.requireAdmin(scopeID, st); err != nil {
+		return err
+	}
 	ev, newOEK, err := chain.BuildMemberChange(
 		s.Agent, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, st.CurrentOEKVer,
@@ -186,6 +211,29 @@ func RunScopeLeave(ctx context.Context, scopeID string, yes bool) error {
 	if err := confirmDanger(yes, fmt.Sprintf("Leave %s?", scopeName(s, scopeID))); err != nil {
 		return err
 	}
+	if role := st.Roles.RoleOf(s.UserSuperPub); role != proto.RoleAdmin {
+		// Only admins sign membership changes (docs/SCOPE_ROLES_PLAN.md).
+		// Hide the scope on this device; an admin removes the membership.
+		sd := s.Body.Scopes[scopeID]
+		sd.Leaving = true
+		s.Body.Scopes[scopeID] = sd
+		if err := s.ReSeal(); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "✓ %s hidden on this device; ask an admin to remove you (fd0 scope remove-member) so you stop receiving its keys\n", scopeName(nil, scopeID))
+		return nil
+	}
+	if len(st.MemberSet) > 1 {
+		admins := 0
+		for _, m := range st.MemberSet {
+			if st.Roles.RoleOf(m) == proto.RoleAdmin {
+				admins++
+			}
+		}
+		if admins == 1 {
+			return fmt.Errorf("you are the only admin of %s; make another member admin first (fd0 scope role CARD admin)", scopeName(s, scopeID))
+		}
+	}
 	// Build the event with op=remove, member=self.
 	proj := projectionFromIndex(st.SecretIndex)
 	ev, _, err := chain.BuildMemberChange(
@@ -237,8 +285,78 @@ func RunScopeMembers(ctx context.Context, scopeID string) error {
 		if bytes.Equal(p, s.UserSuperPub) {
 			marker = "* "
 		}
-		fmt.Printf("%s%s\n", marker, memberDisplay(s, p))
+		fmt.Printf("%s%-8s %s\n", marker, st.Roles.RoleOf(p), memberDisplay(s, p))
 	}
+	return nil
+}
+
+// RunScopeSetRole changes an existing member's role. Read access stays the
+// same, so no OEK is rotated.
+func RunScopeSetRole(ctx context.Context, scopeID, memberCardOrLabel, role string) error {
+	return runScopeSetRole(ctx, scopeID, role, func(s *Session) ([]byte, error) { return s.resolveMember(memberCardOrLabel) })
+}
+
+// RunScopeSetRoleByPublicKey is RunScopeSetRole for callers that hold the
+// member's super_pub (Desktop's access list).
+func RunScopeSetRoleByPublicKey(ctx context.Context, scopeID string, memberPub []byte, role string) error {
+	return runScopeSetRole(ctx, scopeID, role, func(*Session) ([]byte, error) { return memberPub, nil })
+}
+
+func runScopeSetRole(ctx context.Context, scopeID, role string, resolve func(*Session) ([]byte, error)) error {
+	if !proto.ValidRole(role) {
+		return fmt.Errorf("invalid role %q (use admin, writer or reader)", role)
+	}
+	s, err := Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	memberPub, err := resolve(s)
+	if err != nil {
+		return err
+	}
+	scopeID, err = s.resolveScopeID(scopeID)
+	if err != nil {
+		return err
+	}
+	st, err := s.replayAndCheckScope(scopeID)
+	if err != nil {
+		return err
+	}
+	if err := s.requireAdmin(scopeID, st); err != nil {
+		return err
+	}
+	if !memberIn(st.MemberSet, memberPub) {
+		return fmt.Errorf("%s is not a member of %s", memberDisplay(s, memberPub), scopeName(s, scopeID))
+	}
+	if st.Roles.RoleOf(memberPub) == role {
+		fmt.Fprintf(os.Stderr, "%s is already %s in %s\n", memberDisplay(s, memberPub), role, scopeName(s, scopeID))
+		return nil
+	}
+	if err := s.requireScopeRolesSupport(ctx); err != nil {
+		return err
+	}
+	if err := checkRoleTransition(st, proto.OpRole, memberPub, role); err != nil {
+		return err
+	}
+	ev, err := chain.BuildRoleChange(s.Agent, s.UserSuperPub, proto.MustParseScopeID(scopeID),
+		st.TipSeq, st.TipHash, st.CurrentOEKVer, memberPub, role)
+	if err != nil {
+		return err
+	}
+	if err := chain.AppendScope(s.Paths.ScopeChain(proto.MustParseScopeID(scopeID)), ev); err != nil {
+		return err
+	}
+	prefix, _ := ev.PrevHashInput()
+	tipHash := proto.HashPrefix(prefix)
+	sd := s.Body.Scopes[scopeID]
+	sd.ChainTip = proto.ChainTip{Seq: ev.SignedPrefix.Seq, Hash: tipHash[:]}
+	s.Body.Scopes[scopeID] = sd
+	if err := s.ReSeal(); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "✓ %s is now %s in %s\n", memberDisplay(s, memberPub), role, scopeName(s, scopeID))
+	hintSyncForPeers()
 	return nil
 }
 

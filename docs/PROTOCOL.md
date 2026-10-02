@@ -264,15 +264,16 @@ invariants:
 
 ```
 payload = {
-    op             : "add" / "remove",
+    op             : "add" / "remove" / "role",
     member         : bstr .size 32,             ; super_pub
-    enc_projection : bstr,                      ; AEAD under OEK_v(oek_version)
+    enc_projection : bstr,                      ; AEAD under OEK_v(oek_version); absent for op=role
+    ? role         : "admin" / "writer" / "reader", ; add (optional) and role (required); absent = admin
 }
 
 Body (plaintext) = { secrets : [* SecretRecord] }   ; current projection at this seq
 
 server validates:
-  - oek_version == prior_oek_version_max + 1   (=1 at genesis)
+  - op = "add" / "remove": oek_version == prior_oek_version_max + 1   (=1 at genesis)
   - op = "add" never grows auth_list beyond 1000 members
   - key_deliveries count ≤ 131072; existing over-limit scopes may only shrink
   - op = "add":    member ∉ auth_list;
@@ -283,11 +284,21 @@ server validates:
                     and accepts no further events)
   - body size ≤ 1 MB
 
+roles (server validator and client replay apply the same rules, against the
+roles before the event):
+  - members without an explicit role are admins; legacy events carry no role
+  - secret.set: author is writer or admin
+  - member.change (any op): author is admin; the genesis author is admin
+  - op = "role": member ∈ auth_list, role differs from the current one,
+                 oek_version == oek_version_max, key_deliveries == [], no enc_projection
+  - after the event a non-empty auth_list keeps at least one admin
+
 server effect:
   - genesis (seq=0, op=add, member=author): assigns scope_id, auth_list = [author],
                                               oek_version_max = 1
   - op = "add":    auth_list ∪= {member}, oek_version_max += 1
   - op = "remove": auth_list ∖= {member}, oek_version_max += 1
+  - op = "role":   roles[member] = role (auth_list and oek_version_max unchanged)
 ```
 
 ### 4.3 `secret.set`
@@ -323,13 +334,14 @@ The server does not see `id`, `name`, or `payload`.
 
 OEKs are distributed exclusively via `KeyDelivery` entries on `member.change` events. Server enforces:
 
-- `{ kd.recipient_pubkey | kd ∈ key_deliveries }` exactly equals the post-mutation `auth_list`.
+- On `op = add` and `op = remove`: `{ kd.recipient_pubkey | kd ∈ key_deliveries }` exactly equals the post-mutation `auth_list`.
+- On `op = role`: no key deliveries; the OEK and its version stay unchanged.
 
 Clients install OEKs only after the carrying `member.change` event passes full verification (§4.5).
 
 ### 4.5 Projection verification
 
-Existing members verify each `member.change` on receipt:
+Existing members verify each `member.change` with `op = add` or `op = remove` on receipt (`op = role` carries no projection; it only updates roles and keeps keys and the secret index):
 
 ```
 1. Verify signature, prev_hash, author membership.

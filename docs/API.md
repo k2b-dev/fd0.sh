@@ -229,6 +229,18 @@ Content-Type: application/json
 }
 ```
 
+### 2.6a `GET /v1/capabilities`
+
+```
+200 OK
+Content-Type: application/json
+{ "scopeRoles": true }
+```
+
+Unsigned feature list. Clients check it before authoring scope role events so
+they do not create events an older server would reject; it is not an
+authorization signal. The signed `/v1/server-info` record is unchanged.
+
 ### 2.7 `GET /metrics`
 
 Prometheus exposition. RED metrics (requests, errors, duration, in-flight, response bytes) plus the standard process + Go runtime collectors. Guarded by a bearer token when `FD0_METRICS_TOKEN` is set; otherwise serves openly.

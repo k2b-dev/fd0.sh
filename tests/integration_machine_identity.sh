@@ -92,11 +92,30 @@ try:
     # A person admits the machine; the machine reads without prompts.
     card = run(machine, 'card', 'export').stdout.strip()
     run(person, 'card', 'import', card, '--label', 'ci-runner', '--yes')
-    run(person, 'scope', 'add-member', 'ci-runner', '--scope', 'ci-deploy')
+    run(person, 'scope', 'add-member', 'ci-runner', '--scope', 'ci-deploy', '--role', 'reader')
     run(person, 'sync')
     run(machine, 'sync')
     env_out = run(machine, 'service', 'env', 'app', '--format', 'docker-env', '--scope', 'ci-deploy').stdout
     assert env_out == 'APP_TOKEN=MACHINE_IDENTITY_CANARY\n', env_out
+    members = run(person, 'scope', 'members', 'ci-deploy').stdout
+    assert 'reader' in members and 'admin' in members, members
+
+    # A reader cannot change values or membership; nothing is signed locally.
+    denied = run(machine, 'service', 'set', 'app', 'token', '-', '--scope', 'ci-deploy', stdin='MACHINE_WRITE', success=False)
+    assert 'role in' in denied.stderr and 'reader' in denied.stderr, denied.stderr
+    denied = run(machine, 'scope', 'add-member', card, '--scope', 'ci-deploy', success=False)
+    run(machine, 'sync')
+
+    # Promoted to writer, the machine can rotate the value it consumes.
+    run(person, 'scope', 'role', 'ci-runner', 'writer', '--scope', 'ci-deploy')
+    run(person, 'sync')
+    run(machine, 'sync')
+    run(machine, 'service', 'set', 'app', 'token', '-', '--scope', 'ci-deploy', stdin='MACHINE_ROTATED')
+    run(machine, 'sync')
+    run(person, 'sync')
+    assert run(person, 'service', 'get', 'app', 'token', '--raw', '--scope', 'ci-deploy').stdout == 'MACHINE_ROTATED'
+    # The only admin cannot hand the scope over by leaving.
+    assert 'only admin' in run(person, 'scope', 'leave', 'ci-deploy', '--yes', success=False).stderr
 
     # Removal ends access on the next sync.
     run(person, 'scope', 'remove-member', 'ci-runner', '--scope', 'ci-deploy', '--yes')

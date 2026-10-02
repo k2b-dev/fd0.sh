@@ -25,6 +25,7 @@ type ScopeMember struct {
 	Fingerprint string `json:"fingerprint"`
 	Self        bool   `json:"self,omitempty"`
 	Trusted     bool   `json:"trusted,omitempty"`
+	Role        string `json:"role"`
 }
 
 type IdentityCardInfoResult struct {
@@ -39,6 +40,8 @@ type ScopeShareInfoResult struct {
 	ScopeLabel string           `json:"scopeLabel"`
 	Contacts   []TrustedContact `json:"contacts"`
 	Members    []ScopeMember    `json:"members"`
+	// SelfRole is this identity's role; only admins change access.
+	SelfRole string `json:"selfRole"`
 }
 
 func (s *Service) scopeShareInfo(ctx context.Context, scopeID string) (ScopeShareInfoResult, error) {
@@ -73,11 +76,15 @@ func (s *Service) scopeShareInfo(ctx context.Context, scopeID string) (ScopeShar
 	return ScopeShareInfoResult{
 		ScopeLabel: boundedInventoryText(scopeLabel),
 		Contacts:   trustedContacts(session.Body.PinnedIdentities, state.MemberSet),
-		Members:    scopeMembers(session.Body.PinnedIdentities, state.MemberSet, session.UserSuperPub),
+		Members:    scopeMembers(session.Body.PinnedIdentities, state.MemberSet, session.UserSuperPub, state.Roles),
+		SelfRole:   state.Roles.RoleOf(session.UserSuperPub),
 	}, nil
 }
 
-func (s *Service) addScopeMember(ctx context.Context, scopeID, label string) (map[string]bool, error) {
+func (s *Service) addScopeMember(ctx context.Context, scopeID, label, role string) (map[string]bool, error) {
+	if role != "" && !proto.ValidRole(role) {
+		return nil, fail("validation", "Choose admin, writer or reader.", "", false)
+	}
 	if _, err := proto.ParseScopeID(scopeID); err != nil {
 		return nil, fail("validation", "That vault reference is invalid.", "", false)
 	}
@@ -85,7 +92,24 @@ func (s *Service) addScopeMember(ctx context.Context, scopeID, label string) (ma
 	if label == "" || strings.ContainsAny(label, "\r\n\x00") {
 		return nil, fail("validation", "Choose a trusted contact.", "", false)
 	}
-	if err := cli.RunScopeAddMember(ctx, scopeID, label); err != nil {
+	if err := cli.RunScopeAddMember(ctx, scopeID, label, role); err != nil {
+		return nil, mapDomainError(err)
+	}
+	return map[string]bool{"ok": true}, nil
+}
+
+func (s *Service) setScopeMemberRole(ctx context.Context, scopeID, memberID, role string) (map[string]bool, error) {
+	if _, err := proto.ParseScopeID(scopeID); err != nil {
+		return nil, fail("validation", "That vault reference is invalid.", "", false)
+	}
+	if !proto.ValidRole(role) {
+		return nil, fail("validation", "Choose admin, writer or reader.", "", false)
+	}
+	memberPub, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(memberID))
+	if err != nil || len(memberPub) != 32 {
+		return nil, fail("validation", "That vault member reference is invalid.", "Refresh the access list.", false)
+	}
+	if err := cli.RunScopeSetRoleByPublicKey(ctx, scopeID, memberPub, role); err != nil {
 		return nil, mapDomainError(err)
 	}
 	return map[string]bool{"ok": true}, nil
@@ -217,7 +241,7 @@ func memberDisplayLabel(trusted map[string]string, key, self []byte) string {
 	return "Unknown member (" + shortFingerprint(key) + ")"
 }
 
-func scopeMembers(pinned map[string]proto.PinnedIdentity, members [][]byte, self []byte) []ScopeMember {
+func scopeMembers(pinned map[string]proto.PinnedIdentity, members [][]byte, self []byte, roles proto.ScopeRoles) []ScopeMember {
 	trusted := trustedLabelIndex(pinned)
 	result := make([]ScopeMember, 0, len(members))
 	for _, member := range members {
@@ -237,6 +261,7 @@ func scopeMembers(pinned map[string]proto.PinnedIdentity, members [][]byte, self
 			Fingerprint: shortFingerprint(member),
 			Self:        isSelf,
 			Trusted:     isTrusted,
+			Role:        roles.RoleOf(member),
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {

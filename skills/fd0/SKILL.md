@@ -303,6 +303,18 @@ include item tags. Default list/find columns are unchanged. Adding an existing
 tag or removing an absent tag does not create a new revision. Use explicit
 `--scope` when an item name could refer to multiple scopes.
 
+## Scope roles
+
+Scope members have a role: `admin` (values and membership), `writer` (values) or `reader` (read only). Members without an assigned role, including everyone in older scopes, are admins.
+
+```sh
+fd0 scope add-member CARD --scope ops --role reader   # default is admin
+fd0 scope role CARD writer --scope ops                # admins only; keeps at least one admin
+fd0 scope members ops                                 # shows each member's role
+```
+
+Readers and writers cannot remove members or themselves: `fd0 scope leave` hides the scope on their device and an admin removes them. Roles need a server that supports them; fd0 checks before assigning writer or reader. Every member can still read every value, so removal must be followed by rotating the values the member saw.
+
 ## Machine identities
 
 An unattended consumer (CI runner, agent, deploy host) gets its own fd0 identity in its own `FD0_HOME`, owned by a dedicated service account, and is added only to the scopes it needs. Its passphrase is a random key in a file provisioned outside fd0 (mode 0600 or 0400, regular file, owned by the service user or root, at least 32 bytes):
@@ -316,7 +328,7 @@ fd0 sync --pin "SAFETY NUMBER"                        # verify the server's safe
 fd0 card export                                       # a person imports this card and runs scope add-member
 ```
 
-Consumers call `fd0 unlock --key-file …` at the start of every job; it does nothing when already unlocked. The agent's background sync never pins a server, so run `fd0 sync --pin` once after setup. Never copy a machine's `FD0_HOME` to another host. With systemd, load the key with `LoadCredential=fd0.key:/etc/credstore/ci-fd0.key` (or `LoadCredentialEncrypted=`) and use `--key-file "$CREDENTIALS_DIRECTORY/fd0.key"`. Every scope member can change values and membership, so a machine is administrator-equivalent in its scopes: give it dedicated scopes with only its own credentials, never broad human scopes. Keep an independent copy of those credentials so the scope can be recreated. After removing a machine, check the member list and rotate every value it could read; if members were added that you did not add, create a new scope instead of repairing the old one.
+Consumers call `fd0 unlock --key-file …` at the start of every job; it does nothing when already unlocked. The agent's background sync never pins a server, so run `fd0 sync --pin` once after setup. Never copy a machine's `FD0_HOME` to another host. With systemd, load the key with `LoadCredential=fd0.key:/etc/credstore/ci-fd0.key` (or `LoadCredentialEncrypted=`) and use `--key-file "$CREDENTIALS_DIRECTORY/fd0.key"`. Add machines with `--role reader` (or `writer` when they must rotate values) so they cannot change membership, and still prefer dedicated scopes with only their own credentials. Keep an independent copy of those credentials so the scope can be recreated. After removing a machine, check the member list and rotate every value it could read; if members were added that you did not add, create a new scope instead of repairing the old one.
 
 ## Services
 

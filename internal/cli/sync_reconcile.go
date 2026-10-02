@@ -356,6 +356,7 @@ type pendingEvent struct {
 	body   *proto.SecretBody // KindSecretSet
 	op     string            // KindMemberChange
 	target []byte            // KindMemberChange
+	role   string            // KindMemberChange add or role; "" = admin
 }
 
 // savePendingLocalEvents identifies events that exist in our local chain
@@ -430,6 +431,7 @@ func (s *Session) savePendingLocalEvents(scopeID string, serverEvents []proto.Sc
 				kind:   proto.KindMemberChange,
 				op:     ev.SignedPrefix.Payload.Op,
 				target: append([]byte(nil), ev.SignedPrefix.Payload.Member...),
+				role:   ev.SignedPrefix.Payload.Role,
 			})
 		default:
 			return nil, fmt.Errorf("unexpected local-only event kind %q on scope %s", ev.SignedPrefix.Kind, shortScopeID(scopeID))
@@ -502,6 +504,10 @@ func (s *Session) rebuildAndPushSet(ctx context.Context, wcc *WitnessCheckClient
 	if err != nil {
 		return false, err
 	}
+	if role := st.Roles.RoleOf(s.UserSuperPub); role != proto.RoleAdmin && role != proto.RoleWriter {
+		fmt.Fprintf(os.Stderr, "  ↳ rebase: %s value change dropped; your role is now %s\n", shortScopeID(scopeID), role)
+		return true, nil
+	}
 	sd := s.Body.Scopes[scopeID]
 	var curOEK proto.OEKEntry
 	for _, e := range sd.OEKs {
@@ -562,6 +568,17 @@ func (s *Session) rebuildAndPushMemberChange(ctx context.Context, wcc *WitnessCh
 	if err != nil {
 		return false, err
 	}
+	if role := st.Roles.RoleOf(s.UserSuperPub); role != proto.RoleAdmin {
+		fmt.Fprintf(os.Stderr, "  ↳ rebase: %s membership change dropped; your role is now %s\n", shortScopeID(scopeID), role)
+		return true, nil
+	}
+	if err := checkRoleTransition(st, p.op, p.target, p.role); err != nil {
+		fmt.Fprintf(os.Stderr, "  ↳ rebase: %s membership change dropped: %v\n", shortScopeID(scopeID), err)
+		return true, nil
+	}
+	if p.op == proto.OpRole {
+		return s.rebuildAndPushRoleChange(ctx, wcc, server, scopeID, st, p)
+	}
 	// Semantic rebase: drop if the running state already matches our intent.
 	if !chain.RebaseMemberChangeMeaningful(st.MemberSet, p.op, p.target) {
 		shortPub := base64.StdEncoding.EncodeToString(p.target)
@@ -577,10 +594,10 @@ func (s *Session) rebuildAndPushMemberChange(ctx context.Context, wcc *WitnessCh
 	// the push (so a successful push doesn't strand secrets unable to
 	// decrypt against the just-promoted era).
 	proj := projectionFromIndex(st.SecretIndex)
-	ev, newOEK, err := chain.BuildMemberChange(
+	ev, newOEK, err := chain.BuildMemberChangeWithRole(
 		AgentSigner{Agent: s.Agent}, s.UserSuperPub,
 		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, st.CurrentOEKVer,
-		p.op, p.target, st.MemberSet, proj,
+		p.op, p.target, p.role, st.MemberSet, proj,
 	)
 	if err != nil {
 		return false, err
@@ -737,4 +754,58 @@ func (s *Session) pushRebuiltEvent(ctx context.Context, wcc *WitnessCheckClient,
 		return false, nil // caller retries
 	}
 	return false, fmt.Errorf("push refused: %s", r.Reason)
+}
+
+// rebuildAndPushRoleChange re-emits a pending role change against the
+// current tip, or drops it when the target left or already has the role.
+func (s *Session) rebuildAndPushRoleChange(ctx context.Context, wcc *WitnessCheckClient, server canon.URL, scopeID string, st *chain.ScopeState, p pendingEvent) (bool, error) {
+	if !memberIn(st.MemberSet, p.target) || st.Roles.RoleOf(p.target) == p.role {
+		fmt.Fprintf(os.Stderr, "  ↳ rebase: %s role change now a no-op, dropped\n", shortScopeID(scopeID))
+		return true, nil
+	}
+	ev, err := chain.BuildRoleChange(
+		AgentSigner{Agent: s.Agent}, s.UserSuperPub,
+		proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, st.CurrentOEKVer,
+		p.target, p.role,
+	)
+	if err != nil {
+		return false, err
+	}
+	if err := chain.AppendScope(s.Paths.ScopeChain(proto.MustParseScopeID(scopeID)), ev); err != nil {
+		return false, err
+	}
+	prefix, _ := ev.PrevHashInput()
+	tipHash := proto.HashPrefix(prefix)
+	sd := s.Body.Scopes[scopeID]
+	sd.ChainTip = proto.ChainTip{Seq: ev.SignedPrefix.Seq, Hash: tipHash[:]}
+	s.Body.Scopes[scopeID] = sd
+	if err := s.ReSeal(); err != nil {
+		return false, err
+	}
+	return s.pushRebuiltEvent(ctx, wcc, server, scopeID, ev)
+}
+
+// checkRoleTransition applies the last-admin rule to a membership change
+// against st before anything is signed.
+func checkRoleTransition(st *chain.ScopeState, op string, target []byte, role string) error {
+	post := make([][]byte, 0, len(st.MemberSet)+1)
+	for _, m := range st.MemberSet {
+		if op != proto.OpRemove || !bytes.Equal(m, target) {
+			post = append(post, m)
+		}
+	}
+	if op == proto.OpAdd && !memberIn(post, target) {
+		post = append(post, target)
+	}
+	_, err := proto.NextScopeRoles(st.Roles, post, &proto.SignedPrefix{Payload: proto.Payload{Op: op, Member: target, Role: role}})
+	return err
+}
+
+func memberIn(set [][]byte, key []byte) bool {
+	for _, m := range set {
+		if bytes.Equal(m, key) {
+			return true
+		}
+	}
+	return false
 }

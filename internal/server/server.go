@@ -299,6 +299,7 @@ func (s *Server) routes() {
 	// and witness archivers (which are not members of any scope) need
 	// to fetch them to detect equivocation.
 	s.mux.HandleFunc("GET /v1/server-info", s.handleServerInfo)
+	s.mux.HandleFunc("GET /v1/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("GET /v1/chains", s.handleChains)
 	s.mux.HandleFunc("GET /v1/sth/{chainId}", s.handleSTH)
 	s.mux.HandleFunc("GET /v1/proof/inclusion", s.handleInclusionProof)
@@ -328,6 +329,15 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"server_version": s.cfg.Version,
 		"api_version":    "v1",
 	})
+}
+
+// GET /v1/capabilities — unsigned feature list. Clients use it only to avoid
+// authoring events an older server would reject; the validator and client
+// replay enforce the rules. The signed server-info record stays unchanged
+// so older verifiers keep working.
+func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"scopeRoles": true})
 }
 
 // GET /v1/server-info — publish the self-signed pubkey + label + peers

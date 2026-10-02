@@ -1,10 +1,10 @@
 import { For, Show, createMemo, createSignal, onMount, type JSX } from "solid-js";
 import { IconArrowLeft, IconCopy, IconLogout, IconShieldCheck, IconUserMinus, IconUserPlus } from "@tabler/icons-solidjs";
-import type { IdentityCardInfo, ScopeShareInfo, ScopeSummary, TrustedContact } from "../../../shared/contracts";
+import type { IdentityCardInfo, ScopeRole, ScopeShareInfo, ScopeSummary, TrustedContact } from "../../../shared/contracts";
 import { errorText } from "../lib/errors";
 import { initials, plural } from "../lib/format";
 import { Button, IconButton } from "../ui/Button";
-import { Field, Input, Textarea } from "../ui/Fields";
+import { Field, Input, Select, Textarea } from "../ui/Fields";
 import { Modal } from "../ui/Modal";
 
 /**
@@ -23,7 +23,8 @@ export function ShareVaultModal(props: {
   onNotify(message: string): void;
 }): JSX.Element {
   const [mode, setMode] = createSignal<"access" | "new-contact">("access");
-  const [info, setInfo] = createSignal<ScopeShareInfo>({ scopeLabel: props.scope.label, contacts: [], members: [] });
+  const [info, setInfo] = createSignal<ScopeShareInfo>({ scopeLabel: props.scope.label, contacts: [], members: [], selfRole: "reader" });
+  const [newRole, setNewRole] = createSignal<ScopeRole>("admin");
   const [ownCard, setOwnCard] = createSignal<IdentityCardInfo | null>(null);
   const [cardURL, setCardURL] = createSignal("");
   const [contactLabel, setContactLabel] = createSignal("");
@@ -35,6 +36,7 @@ export function ShareVaultModal(props: {
   const [vaultName, setVaultName] = createSignal(props.scope.label);
 
   const available = createMemo(() => info().contacts.filter((contact) => !contact.shared));
+  const isAdmin = createMemo(() => info().selfRole === "admin");
   const canTrust = createMemo(() => Boolean(cardPreview() && reviewedURL() === cardURL().trim() && contactLabel().trim()));
   const isNewContact = (): boolean => mode() === "new-contact";
 
@@ -70,8 +72,9 @@ export function ShareVaultModal(props: {
     setBusy(`add:${contact.label}`);
     setError("");
     try {
-      await window.fd0.addScopeMember(props.scope.id, contact.label);
-      await finishMembershipChange(`${contact.label} can now open ${props.scope.label}`);
+      const added = await window.fd0.addScopeMember(props.scope.id, contact.label, newRole());
+      if (!added.ok) return;
+      await finishMembershipChange(`${contact.label} can now open ${props.scope.label} as ${newRole()}`);
     } catch (cause) {
       setError(errorText(cause));
     } finally {
@@ -91,6 +94,24 @@ export function ShareVaultModal(props: {
       await finishMembershipChange(`${label} no longer has access to ${props.scope.label}`);
     } catch (cause) {
       setError(errorText(cause));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function changeRole(memberID: string, label: string, role: ScopeRole): Promise<void> {
+    setBusy(`role:${memberID}`);
+    setError("");
+    try {
+      const result = await window.fd0.setScopeMemberRole(props.scope.id, memberID, role);
+      if (!result.ok) {
+        await loadInfo(false);
+        return;
+      }
+      await finishMembershipChange(`${label} is now ${role} in ${props.scope.label}`);
+    } catch (cause) {
+      setError(errorText(cause));
+      await loadInfo(false);
     } finally {
       setBusy("");
     }
@@ -118,9 +139,9 @@ export function ShareVaultModal(props: {
     try {
       const result = await window.fd0.leaveScope(props.scope.id);
       if (!result.ok) return;
-      if (!window.fd0.development) await window.fd0.sync();
+      if (!result.hidden && !window.fd0.development) await window.fd0.sync();
       await props.onChanged();
-      props.onNotify(`Left ${info().scopeLabel}`);
+      props.onNotify(result.hidden ? `${info().scopeLabel} hidden on this device` : `Left ${info().scopeLabel}`);
       props.onClose();
     } catch (cause) {
       setError(errorText(cause));
@@ -177,8 +198,9 @@ export function ShareVaultModal(props: {
         props.onNotify("Nothing was added");
         return;
       }
-      await window.fd0.addScopeMember(props.scope.id, label);
-      await finishMembershipChange(`${label} can now open ${props.scope.label}`);
+      const added = await window.fd0.addScopeMember(props.scope.id, label, newRole());
+      if (!added.ok) return;
+      await finishMembershipChange(`${label} can now open ${props.scope.label} as ${newRole()}`);
       setMode("access");
       setCardURL("");
       setContactLabel("");
@@ -273,13 +295,23 @@ export function ShareVaultModal(props: {
                         <strong>{member.self ? "You" : member.label}</strong>
                         <small classList={{ "is-verified": Boolean(member.trusted) && !member.self }}>
                           {member.self
-                            ? "Owner · this device"
+                            ? `${roleLabels[member.role]} · this device`
                             : member.trusted
-                              ? "Identity confirmed"
-                              : "Added before you saved them as a contact"}
+                              ? `${roleLabels[member.role]} · identity confirmed`
+                              : `${roleLabels[member.role]} · added before you saved them as a contact`}
                         </small>
                       </span>
-                      <Show when={!member.self}>
+                      <Show when={isAdmin() && !member.self}>
+                        <Select
+                          class="access-role-select"
+                          label={`Role of ${member.label}`}
+                          value={member.role}
+                          options={roleOptions}
+                          disabled={busy() === `role:${member.id}`}
+                          onChange={(value) => void changeRole(member.id, member.label, value as ScopeRole)}
+                        />
+                      </Show>
+                      <Show when={isAdmin() && !member.self}>
                         <Button
                           size="sm"
                           variant="danger"
@@ -296,12 +328,17 @@ export function ShareVaultModal(props: {
               </div>
             </section>
 
+            <Show when={!isAdmin()}>
+              <p class="share-loading">You are {roleLabels[info().selfRole].toLowerCase()} in this vault. Only admins can change who has access.</p>
+            </Show>
+            <Show when={isAdmin()}>
             <section class="share-section">
               <div class="share-section-heading">
                 <div>
                   <strong>People you know</strong>
                   <small>Anyone whose identity you have already confirmed.</small>
                 </div>
+                <Select label="Role for people you add" value={newRole()} options={roleOptions} onChange={(value) => setNewRole(value as ScopeRole)} />
                 <Button
                   size="sm"
                   onClick={() => {
@@ -344,6 +381,8 @@ export function ShareVaultModal(props: {
               </Show>
             </section>
 
+            </Show>
+
             <section class="share-section">
               <div class="share-section-heading">
                 <div>
@@ -351,6 +390,7 @@ export function ShareVaultModal(props: {
                   <small>The name is shared with every member.</small>
                 </div>
               </div>
+              <Show when={info().selfRole !== "reader"}>
               <div class="vault-settings-row">
                 <Input
                   aria-label="Vault name"
@@ -365,10 +405,13 @@ export function ShareVaultModal(props: {
                   {busy() === "rename-vault" ? "Renaming…" : "Rename"}
                 </Button>
               </div>
+              </Show>
               <div class="vault-danger-row">
                 <span>
-                  <strong>Leave this vault</strong>
-                  <small>Its items disappear from this device after the change syncs.</small>
+                  <strong>{isAdmin() ? "Leave this vault" : "Hide this vault"}</strong>
+                  <small>{isAdmin()
+                    ? "Its items disappear from this device after the change syncs."
+                    : "Its items disappear from this device. You stay a member until an admin removes you."}</small>
                 </span>
                 <Button
                   size="sm"
@@ -377,7 +420,7 @@ export function ShareVaultModal(props: {
                   onClick={() => void leaveVault()}
                 >
                   <IconLogout size={14} />
-                  {busy() === "leave-vault" ? "Leaving…" : "Leave…"}
+                  {busy() === "leave-vault" ? (isAdmin() ? "Leaving…" : "Hiding…") : (isAdmin() ? "Leave…" : "Hide…")}
                 </Button>
               </div>
             </section>
@@ -461,6 +504,14 @@ export function ShareVaultModal(props: {
     </Modal>
   );
 }
+
+const roleLabels: Record<ScopeRole, string> = { admin: "Admin", writer: "Writer", reader: "Reader" };
+
+const roleOptions = [
+  { value: "admin", label: "Admin" },
+  { value: "writer", label: "Writer" },
+  { value: "reader", label: "Reader" },
+];
 
 function formatExpiry(raw: string): string {
   const date = new Date(raw);

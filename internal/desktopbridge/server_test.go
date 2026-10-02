@@ -337,7 +337,7 @@ func TestScopeMembersIncludeSelfTrustedAndUnknown(t *testing.T) {
 	unknown := bytes.Repeat([]byte{3}, 32)
 	members := scopeMembers(map[string]proto.PinnedIdentity{
 		"Benny": {SuperPub: benny, Label: "Benny"},
-	}, [][]byte{unknown, benny, self}, self)
+	}, [][]byte{unknown, benny, self}, self, nil)
 	if len(members) != 3 {
 		t.Fatalf("members=%+v", members)
 	}

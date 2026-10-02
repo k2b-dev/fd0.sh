@@ -18,6 +18,9 @@ import (
 type ScopeMeta struct {
 	OEKVersionMax uint64   `cbor:"oek_version_max"`
 	Members       [][]byte `cbor:"members"` // sorted Ed25519 super_pubs
+	// Roles holds non-admin roles (docs/SCOPE_ROLES_PLAN.md); members
+	// without an entry are admins.
+	Roles proto.ScopeRoles `cbor:"roles,omitempty"`
 }
 
 // UserMeta is the CBOR shape stored in chains.metadata for user chains.
@@ -124,6 +127,9 @@ func ScopeEvent(ev *proto.ScopeEvent, prior *ScopeMeta, priorTipHash []byte, pri
 		if !bytes.Equal(sp.Payload.Member, sp.Author) {
 			return nil, errors.New("scope: genesis member must equal author")
 		}
+		if err := proto.GenesisRole(sp); err != nil {
+			return nil, err
+		}
 		if sp.OEKVersion != 1 {
 			return nil, errors.New("scope: genesis oek_version must be 1")
 		}
@@ -150,8 +156,8 @@ func ScopeEvent(ev *proto.ScopeEvent, prior *ScopeMeta, priorTipHash []byte, pri
 	if !bytes.Equal(sp.PrevHash, priorTipHash) {
 		return nil, errors.New("scope: prev_hash mismatch")
 	}
-	if !memberContains(prior.Members, sp.Author) {
-		return nil, errors.New("scope: author not in auth_list")
+	if err := proto.AuthorizeScopeEvent(sp, prior.Members, prior.Roles); err != nil {
+		return nil, err
 	}
 	switch sp.Kind {
 	case proto.KindMemberChange:
@@ -170,15 +176,30 @@ func validateMemberChange(sp *proto.SignedPrefix, prior *ScopeMeta) (*ScopeMeta,
 	if len(sp.KeyDeliveries) > proto.MaxKeyDeliveries {
 		return nil, errors.New("member.change: too many key_deliveries")
 	}
-	if sp.OEKVersion != prior.OEKVersionMax+1 {
-		return nil, fmt.Errorf("member.change: oek_version=%d, want %d", sp.OEKVersion, prior.OEKVersionMax+1)
-	}
 	// Payload shape: member.change must have op/member, must NOT have enc_body.
 	if len(sp.Payload.EncBody) != 0 {
 		return nil, errors.New("member.change: enc_body must be empty")
 	}
 	if sp.Payload.Op == "" || len(sp.Payload.Member) != 32 {
 		return nil, errors.New("member.change: op/member missing")
+	}
+	if sp.Payload.Op == proto.OpRole {
+		// A role change keeps membership and read access, so the OEK is
+		// not rotated: no new version, no key deliveries, no projection.
+		if sp.OEKVersion != prior.OEKVersionMax {
+			return nil, fmt.Errorf("member.change role: oek_version=%d, want %d", sp.OEKVersion, prior.OEKVersionMax)
+		}
+		if len(sp.KeyDeliveries) != 0 || len(sp.Payload.EncProjection) != 0 {
+			return nil, errors.New("member.change role: key_deliveries and enc_projection must be empty")
+		}
+		roles, err := proto.NextScopeRoles(prior.Roles, prior.Members, sp)
+		if err != nil {
+			return nil, err
+		}
+		return &ScopeMeta{OEKVersionMax: prior.OEKVersionMax, Members: prior.Members, Roles: roles}, nil
+	}
+	if sp.OEKVersion != prior.OEKVersionMax+1 {
+		return nil, fmt.Errorf("member.change: oek_version=%d, want %d", sp.OEKVersion, prior.OEKVersionMax+1)
 	}
 	switch sp.Payload.Op {
 	case proto.OpAdd:
@@ -221,9 +242,14 @@ func validateMemberChange(sp *proto.SignedPrefix, prior *ScopeMeta) (*ScopeMeta,
 	if len(sp.Payload.EncProjection) > 1<<20 {
 		return nil, errors.New("member.change: body too large")
 	}
+	roles, err := proto.NextScopeRoles(prior.Roles, post, sp)
+	if err != nil {
+		return nil, err
+	}
 	return &ScopeMeta{
 		OEKVersionMax: sp.OEKVersion,
 		Members:       post,
+		Roles:         roles,
 	}, nil
 }
 

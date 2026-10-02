@@ -1709,6 +1709,25 @@ function registerIPC(client: BridgeSupervisor): void {
     if (!scope) throw new Error("That vault is no longer available");
     if (inventory.scopes.length <= 1) throw new Error("You cannot leave your only vault");
     const count = inventory.items.filter((item) => item.scopeId === scopeId).length;
+    const items = `${count} item${count === 1 ? "" : "s"}`;
+    // Only admins change membership; other members can only hide a vault
+    // on this device and stay members until an admin removes them.
+    const { selfRole } = await client.request<ScopeShareInfo>("scope.shareInfo", { scopeId });
+    if (selfRole !== "admin") {
+      const hide = await dialog.showMessageBox(mainWindow, {
+        type: "warning",
+        buttons: ["Cancel", "Hide vault"],
+        defaultId: 0,
+        cancelId: 0,
+        title: `Hide ${dialogText(scope.label, "this vault")}?`,
+        message: `Hide ${dialogText(scope.label, "this vault")} and remove its items from this device?`,
+        detail: `${items} will disappear from this device. You stay a member as ${selfRole} and can still decrypt this vault; ask an admin of the vault to remove you.`,
+        noLink: true,
+      });
+      if (hide.response !== 1) return { ok: false };
+      await client.request("scope.leave", { scopeId });
+      return { ok: true, hidden: true };
+    }
     const confirmation = await dialog.showMessageBox(mainWindow, {
       type: "warning",
       buttons: ["Cancel", "Leave vault"],
@@ -1716,14 +1735,15 @@ function registerIPC(client: BridgeSupervisor): void {
       cancelId: 0,
       title: `Leave ${dialogText(scope.label, "this vault")}?`,
       message: `Leave ${dialogText(scope.label, "this vault")} and remove its items from this device?`,
-      detail: `${count} item${count === 1 ? "" : "s"} will disappear after the leave syncs. Other vault members keep their access.`,
+      detail: `${items} will disappear after the leave syncs. Other vault members keep their access.`,
       noLink: true,
     });
     if (confirmation.response !== 1) return { ok: false };
     return client.request("scope.leave", { scopeId });
   });
   handle("fd0:scope-share-info", (scopeId: string) => client.request("scope.shareInfo", { scopeId }));
-  handle("fd0:scope-add-member", async (scopeId: string, label: string) => {
+  handle("fd0:scope-add-member", async (scopeId: string, label: string, role: string) => {
+    if (!["", "admin", "writer", "reader"].includes(role)) throw new Error("Unknown vault role");
     if (!mainWindow) throw new Error("fd0 window is unavailable");
     const info = await client.request<ScopeShareInfo>("scope.shareInfo", { scopeId });
     const contact = info.contacts.find((candidate) => candidate.label === label && !candidate.shared);
@@ -1735,11 +1755,30 @@ function registerIPC(client: BridgeSupervisor): void {
       cancelId: 0,
       title: `Share ${dialogText(info.scopeLabel, "this vault")}?`,
       message: `Give ${dialogText(contact.label, "this contact")} access to ${dialogText(info.scopeLabel, "this vault")}?`,
-      detail: `Safety fingerprint: ${contact.fingerprint}…\n\nThey will be able to decrypt every current and future item in this vault.`,
+      detail: `Safety fingerprint: ${contact.fingerprint}…\n\nRole: ${roleDescription(role || "admin")}\n\nThey will be able to decrypt every current and future item in this vault.`,
       noLink: true,
     });
     if (confirmation.response !== 1) return { ok: false };
-    return client.request("scope.addMember", { scopeId, label: contact.label });
+    return client.request("scope.addMember", { scopeId, label: contact.label, role });
+  });
+  handle("fd0:scope-set-member-role", async (scopeId: string, memberId: string, role: string) => {
+    if (!mainWindow) throw new Error("fd0 window is unavailable");
+    if (!["admin", "writer", "reader"].includes(role)) throw new Error("Unknown vault role");
+    const info = await client.request<ScopeShareInfo>("scope.shareInfo", { scopeId });
+    const member = info.members.find((candidate) => candidate.id === memberId);
+    if (!member) throw new Error("That vault member is no longer available");
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      buttons: ["Cancel", "Change role"],
+      defaultId: 0,
+      cancelId: 0,
+      title: `Change ${dialogText(member.label, "this member")}'s role?`,
+      message: `Make ${dialogText(member.label, "this member")} ${role} in ${dialogText(info.scopeLabel, "this vault")}?`,
+      detail: `${roleDescription(role)}\n\nEvery member can still read every item; removing access is a separate step.`,
+      noLink: true,
+    });
+    if (confirmation.response !== 1) return { ok: false };
+    return client.request("scope.setMemberRole", { scopeId, memberId, role });
   });
   handle("fd0:scope-remove-member", async (scopeId: string, memberId: string) => {
     if (!mainWindow) throw new Error("fd0 window is unavailable");
@@ -2641,3 +2680,9 @@ void start().catch((error) => {
     app.quit();
   }
 });
+
+function roleDescription(role: string): string {
+  if (role === "reader") return "Reader: can open items but cannot change them or who has access.";
+  if (role === "writer") return "Writer: can open and change items but cannot change who has access.";
+  return "Admin: can open and change items and decide who has access.";
+}

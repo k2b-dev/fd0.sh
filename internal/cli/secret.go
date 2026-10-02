@@ -200,6 +200,9 @@ func RunSecretSet(ctx context.Context, scopeID, name, value string) error {
 		ID:     sid,
 		Record: preservedRecord(previous, name, "kv.string", value),
 	}
+	if err := s.requireValueWrite(scopeID, st); err != nil {
+		return err
+	}
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub, proto.MustParseScopeID(scopeID), st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
 	if err != nil {
 		return err
@@ -466,6 +469,9 @@ func removeRecord(ctx context.Context, scopeID, name, label, noun string, yes bo
 		}
 	}
 	body := &proto.SecretBody{ID: sid, Record: nil}
+	if err := s.requireValueWrite(scopeID, st); err != nil {
+		return err
+	}
 	ev, err := chain.BuildSecretSet(AgentSigner{Agent: s.Agent}, s.UserSuperPub, proto.MustParseScopeID(scopeID),
 		st.TipSeq, st.TipHash, curOEK.Key, curOEK.Version, body)
 	if err != nil {

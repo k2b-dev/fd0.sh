@@ -1,6 +1,6 @@
 # Machine identities plan
 
-Status: phase A implemented 2026-10-01 after two peer reviews; phase B needs its own design review.
+Status: phase A implemented 2026-10-01 after two peer reviews; phase B implemented 2026-10-02 as scope roles (docs/SCOPE_ROLES_PLAN.md).
 
 ## Outcome and scope
 
@@ -48,7 +48,7 @@ fd0 sync                                             # after admission
 - In-process tests: `init --key-file`, `unlock --key-file` without a TTY and after expiry, refusal without fallback, `sync --pin` match, mismatch and existing-pin verification against a local test server.
 - Guarded integration script: machine identity created, admitted by a person, syncs with a pin, reads a service, loses access after removal.
 
-## Phase B (outline, needs design review)
+## Phase B (implemented, see docs/SCOPE_ROLES_PLAN.md)
 
 - `member.change` gains a role. The scope creator is `admin`. Only admins may author `member.change`; `writer` and `admin` may author `secret.set`; `reader` authors nothing.
 - The server validator and client replay enforce the same rules; a client never accepts an event the rules forbid, even from a misbehaving server.

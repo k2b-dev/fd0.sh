@@ -219,6 +219,7 @@
 .access-list { display: flex; flex-direction: column; }
 .access-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--line-soft); }
 .access-row:last-child { border-bottom: 0; }
+.access-row .access-role-select { flex: 0 0 auto; width: 120px; }
 .access-avatar {
   display: grid;
   place-items: center;

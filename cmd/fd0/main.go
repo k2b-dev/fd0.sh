@@ -928,6 +928,7 @@ type scopeCmd struct {
 	RemoveMember scopeRemoveMemberCmd `cmd:"" name:"remove-member" help:"Remove a member."`
 	Leave        scopeLeaveCmd        `cmd:"" help:"Leave a scope (remove self + drop locally)."`
 	Rename       scopeRenameCmd       `cmd:"" help:"Rename a scope's shared label."`
+	Role         scopeRoleCmd         `cmd:"" help:"Change a member's role (admin, writer, reader)."`
 }
 type scopeCreateCmd struct {
 	Label string `name:"label" help:"Optional human-readable label."`
@@ -938,6 +939,12 @@ type scopeMembersCmd struct {
 }
 type scopeAddMemberCmd struct {
 	Card  string `arg:"" help:"Member card URL or pinned label."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	Role  string `name:"role" enum:"admin,writer,reader," default:"" help:"Member role: admin (default; may change values and membership), writer (may change values) or reader (read only)."`
+}
+type scopeRoleCmd struct {
+	Card  string `arg:"" help:"Member card URL or pinned label."`
+	Role  string `arg:"" enum:"admin,writer,reader" help:"New role: admin, writer or reader."`
 	Scope string `name:"scope" help:"Scope label or id."`
 }
 type scopeRemoveMemberCmd struct {
@@ -1124,6 +1131,7 @@ func commandNeedsUnlockedVault(command string) bool {
 		"scope list", "scope ls",
 		"scope members", "scope members <scope>",
 		"scope add-member <card>",
+		"scope role <card> <role>",
 		"scope remove-member <card>",
 		"scope leave", "scope leave <scope>",
 		"scope rename <scope> <new-label>",
@@ -1329,7 +1337,9 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 	case "scope members", "scope members <scope>":
 		return cli.RunScopeMembers(ctx, c.Scope.Members.Scope)
 	case "scope add-member <card>":
-		return cli.RunScopeAddMember(ctx, c.Scope.AddMember.Scope, c.Scope.AddMember.Card)
+		return cli.RunScopeAddMember(ctx, c.Scope.AddMember.Scope, c.Scope.AddMember.Card, c.Scope.AddMember.Role)
+	case "scope role <card> <role>":
+		return cli.RunScopeSetRole(ctx, c.Scope.Role.Scope, c.Scope.Role.Card, c.Scope.Role.Role)
 	case "scope remove-member <card>":
 		return cli.RunScopeRemoveMember(ctx, c.Scope.RemoveMember.Scope, c.Scope.RemoveMember.Card, c.Scope.RemoveMember.Yes)
 	case "scope leave", "scope leave <scope>":

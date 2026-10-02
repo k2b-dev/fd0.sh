@@ -173,7 +173,7 @@ func TestHistoryAuthorLabelsMatchScopeMembers(t *testing.T) {
 		t.Fatalf("unknown label %q lost its short fingerprint", got)
 	}
 	// Never the raw full fingerprint.
-	members := scopeMembers(pinned, [][]byte{unknown}, self)
+	members := scopeMembers(pinned, [][]byte{unknown}, self, nil)
 	if len(members) != 1 {
 		t.Fatalf("members=%+v", members)
 	}

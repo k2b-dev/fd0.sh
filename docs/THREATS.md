@@ -829,3 +829,28 @@ commits revalidate grants, so changed targets, replaced/deleted keys and observe
 membership removal stop affected grants. Offline agents cannot observe remote
 revocation until synchronization. Local grant revocation does not remove a
 public key from a remote server's authorized_keys file.
+
+## Scope roles
+
+Scope members are `admin`, `writer` or `reader` (docs/SCOPE_ROLES_PLAN.md).
+Every member still receives the scope's OEKs, so roles restrict what a member
+can sign into the chain, not what it can read or disclose. A compromised reader
+can read and leak every value in its scopes but cannot sign value or membership
+changes. A compromised writer can also alter or delete values and the scope's
+name and organization tags, which are ordinary records, and like any member it
+can submit events other clients cannot decrypt (T28). Admins are unchanged.
+
+The server validator and client replay share one authorization function, and
+replay rejects forbidden events even before the replaying client's own
+admission, so a misbehaving server cannot make clients accept them. Clients
+also refuse to sign events their own role does not allow. Only admins sign
+membership changes: readers and writers leave by hiding the scope locally and
+asking an admin to remove them, because the leaving member would otherwise
+author the next OEK deliveries and projection for everyone else.
+
+Older clients and servers drop the unknown `role` field when re-encoding a
+signed prefix, so signatures fail and they reject role events rather than
+ignore roles. An older server started on a database that already holds roles
+would forget them; from store generation 2 on, servers refuse databases of a
+newer generation, and downgrading after roles are used is unsupported.
+

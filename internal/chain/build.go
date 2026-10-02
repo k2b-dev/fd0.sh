@@ -2,6 +2,7 @@ package chain
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/valentinkolb/fd0.sh/internal/crypto"
 	"github.com/valentinkolb/fd0.sh/internal/proto"
@@ -172,6 +173,23 @@ func BuildMemberChange(
 	priorMembers [][]byte,
 	projection *proto.MemberProjection,
 ) (*proto.ScopeEvent, []byte /* new OEK */, error) {
+	return BuildMemberChangeWithRole(signer, superPub, scopeID, prevSeq, prevHash, priorOEKVersion, op, target, "", priorMembers, projection)
+}
+
+// BuildMemberChangeWithRole is BuildMemberChange for an add that assigns a
+// role (docs/SCOPE_ROLES_PLAN.md). An empty role keeps the legacy wire form,
+// which means admin.
+func BuildMemberChangeWithRole(
+	signer Signer, superPub []byte,
+	scopeID proto.ScopeID, prevSeq uint64, prevHash []byte,
+	priorOEKVersion uint64,
+	op string, target []byte, role string,
+	priorMembers [][]byte,
+	projection *proto.MemberProjection,
+) (*proto.ScopeEvent, []byte /* new OEK */, error) {
+	if role != "" && (op != proto.OpAdd || !proto.ValidRole(role)) {
+		return nil, nil, fmt.Errorf("member.change: invalid role %q for op %q", role, op)
+	}
 	newOEK, err := crypto.RandomBytes(32)
 	if err != nil {
 		return nil, nil, err
@@ -202,6 +220,7 @@ func BuildMemberChange(
 			Payload: proto.Payload{
 				Op:     op,
 				Member: append([]byte(nil), target...),
+				Role:   role,
 			},
 		},
 	}
@@ -218,6 +237,39 @@ func BuildMemberChange(
 		return nil, nil, err
 	}
 	return ev, newOEK, nil
+}
+
+// BuildRoleChange builds a member.change op=role. Read access does not
+// change, so the OEK version stays and there are no key deliveries and no
+// projection.
+func BuildRoleChange(
+	signer Signer, superPub []byte,
+	scopeID proto.ScopeID, prevSeq uint64, prevHash []byte,
+	currentOEKVersion uint64,
+	target []byte, role string,
+) (*proto.ScopeEvent, error) {
+	if !proto.ValidRole(role) {
+		return nil, fmt.Errorf("member.change role: invalid role %q", role)
+	}
+	ev := &proto.ScopeEvent{
+		SignedPrefix: proto.SignedPrefix{
+			Kind:          proto.KindMemberChange,
+			Scope:         proto.ScopePtr(scopeID),
+			PrevHash:      append([]byte(nil), prevHash...),
+			Author:        append([]byte(nil), superPub...),
+			Seq:           prevSeq + 1,
+			OEKVersion:    currentOEKVersion,
+			Payload: proto.Payload{
+				Op:     proto.OpRole,
+				Member: append([]byte(nil), target...),
+				Role:   role,
+			},
+		},
+	}
+	if err := signScope(ev, signer); err != nil {
+		return nil, err
+	}
+	return ev, nil
 }
 
 // signScope fills ev.Signature via signer. Wraps Signer.Sign in the
@@ -251,13 +303,10 @@ func encryptProjection(oek []byte, proj *proto.MemberProjection, prefix *proto.S
 	if err != nil {
 		return nil, err
 	}
-	aadPrefix := *prefix
-	aadPrefix.Payload = proto.Payload{Op: prefix.Payload.Op, Member: prefix.Payload.Member}
-	body, err := proto.Marshal(aadPrefix)
+	aad, err := ProjectionAAD(&proto.ScopeEvent{SignedPrefix: *prefix})
 	if err != nil {
 		return nil, err
 	}
-	aad := append([]byte(proto.DomainEvent), body...)
 	ct, err := crypto.AEADSeal(oek, nonce, plain, aad)
 	if err != nil {
 		return nil, err
