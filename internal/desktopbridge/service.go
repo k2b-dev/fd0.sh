@@ -623,6 +623,11 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 		if err := decodeParams(raw, &params); err != nil {
 			return nil, err
 		}
+		if params.Role != "" && params.Role != proto.RoleAdmin {
+			if err := s.requireRolesServer(); err != nil {
+				return nil, err
+			}
+		}
 		return s.addScopeMember(ctx, params.ScopeID, params.Label, params.Role)
 	case "scope.setMemberRole":
 		var params struct {
@@ -631,6 +636,9 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 			Role     string `json:"role"`
 		}
 		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		if err := s.requireRolesServer(); err != nil {
 			return nil, err
 		}
 		return s.setScopeMemberRole(ctx, params.ScopeID, params.MemberID, params.Role)
@@ -1936,4 +1944,14 @@ func mapDomainError(err error) error {
 	default:
 		return err
 	}
+}
+
+// requireRolesServer refuses role assignments in the isolated development
+// vault: they first ask the sync server whether it supports roles, and the
+// isolated vault never contacts a server.
+func (s *Service) requireRolesServer() error {
+	if s.Mode == "isolated" {
+		return fail("sync_disabled", "Roles other than admin need a sync server, which is disabled for the isolated development vault.", "Use a dedicated test server to try roles.", false)
+	}
+	return nil
 }

@@ -74,13 +74,16 @@ export function ShareVaultModal(props: {
     try {
       const added = await window.fd0.addScopeMember(props.scope.id, contact.label, newRole());
       if (!added.ok) return;
-      await finishMembershipChange(`${contact.label} can now open ${props.scope.label} as ${newRole()}`);
+      await finishMembershipChange(`${contact.label} can now open ${props.scope.label}${roleSuffix()}`);
     } catch (cause) {
       setError(errorText(cause));
     } finally {
       setBusy("");
     }
   }
+
+  // Admin is the default; only narrower roles are worth mentioning.
+  const roleSuffix = () => (newRole() === "admin" ? "" : ` as ${newRole()}`);
 
   async function removeMember(memberID: string, label: string): Promise<void> {
     setBusy(`remove:${memberID}`);
@@ -200,7 +203,7 @@ export function ShareVaultModal(props: {
       }
       const added = await window.fd0.addScopeMember(props.scope.id, label, newRole());
       if (!added.ok) return;
-      await finishMembershipChange(`${label} can now open ${props.scope.label} as ${newRole()}`);
+      await finishMembershipChange(`${label} can now open ${props.scope.label}${roleSuffix()}`);
       setMode("access");
       setCardURL("");
       setContactLabel("");
