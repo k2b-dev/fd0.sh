@@ -10,7 +10,7 @@
 # Final image: scratch + statically-linked Go binary + CA bundle. ~18 MB.
 
 # ─── Stage 1: build ──────────────────────────────────────────────────────
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 
 RUN apk add --no-cache ca-certificates git
 WORKDIR /src
