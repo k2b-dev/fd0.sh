@@ -1,5 +1,5 @@
 import { For, Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
-import type { RecordRef, SSHGrantResult, SSHGrantView, UnlockInput, VaultStatus } from "../../../shared/contracts";
+import type { RecordRef, SSHGrantResult, SSHGrantView, UnlockInput } from "../../../shared/contracts";
 import { useVault } from "../lib/store";
 import { toAppError } from "../lib/errors";
 import { Button } from "../ui/Button";
@@ -82,37 +82,4 @@ export function SSHGrantPanel(props: { item: RecordRef }): JSX.Element {
     </div>}</Show>
     <Show when={error()}><p role="alert">{error()}</p></Show>
   </section>;
-}
-
-export function ActiveSSHGrants(props: { status: VaultStatus | null; onStatus(status: VaultStatus): void }): JSX.Element {
-  const [grants, setGrants] = createSignal<SSHGrantView[]>([]);
-  const [error, setError] = createSignal("");
-  const [busy, setBusy] = createSignal(false);
-  let alive = true;
-  let revision = 0;
-  onCleanup(() => { alive = false; revision++; });
-  createEffect(() => {
-    const current = ++revision;
-    const count = props.status?.sshGrantCount ?? 0;
-    if (!count) { setGrants([]); return; }
-    void window.fd0.sshGrant({ action: "list" }).then((r) => { if (alive && current === revision) setGrants(r.grants.filter((g) => g.active)); }).catch((cause) => { if (alive) setError(grantError(cause)); });
-  });
-  async function lockAll(): Promise<void> {
-    setBusy(true);
-    try { const status = await window.fd0.lock(true); if (alive) { setGrants([]); props.onStatus(status); } }
-    catch (cause) { if (alive) setError(grantError(cause)); }
-    finally { if (alive) setBusy(false); }
-  }
-  return <Show when={(props.status?.sshGrantCount ?? 0) > 0}>
-    <details class="auth-ssh-grants" open={Boolean(error()) || undefined}>
-      <summary>{props.status?.sshGrantCount} active SSH {(props.status?.sshGrantCount ?? 0) === 1 ? "grant" : "grants"}</summary>
-      <div class="auth-ssh-grants-content">
-        <p>These hosts remain accessible while fd0 is locked.</p>
-        <For each={grants()}>{(g) => <Button disabled={busy()} onClick={() => void window.fd0.openSSHHost({ scopeId: g.scopeId, name: `host:${g.name}` }).catch((cause) => { if (alive) setError(grantError(cause)); })}>Open SSH: {g.name}</Button>}</For>
-        <Button disabled={busy()} onClick={() => void lockAll()}>Lock everything</Button>
-        <p>Stops new SSH authentication until the next unlock. Existing connections stay open.</p>
-        <Show when={error()}><p role="alert">{error()}</p></Show>
-      </div>
-    </details>
-  </Show>;
 }

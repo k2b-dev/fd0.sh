@@ -84,19 +84,41 @@ for (const mode of ["unlock", "grant"]) {
 
 }
 
-test("unlock keeps active SSH grants in a collapsed summary", () => withPage(async (page) => {
+test("active grants open a full-window overview instead of the unlock form", () => withPage(async (page) => {
   await page.evaluate(() => window.authTest.grants(2));
-  const summary = page.getByText("2 active SSH grants");
-  await summary.waitFor();
-  expect(await page.getByRole("button", { name: "Lock everything" }).isVisible()).toBe(false);
-  await summary.click();
-  await page.getByRole("button", { name: "Open SSH: build-1" }).waitFor();
+  const pill = page.getByRole("button", { name: "2 active grants" });
+  await pill.waitFor();
+  expect(await page.getByRole("button", { name: "Lock everything" }).count()).toBe(0);
+  await pill.click();
+  await page.getByRole("heading", { name: "Active while locked" }).waitFor();
+  expect(await page.getByRole("button", { name: "Unlock", exact: true }).isVisible()).toBe(true);
+  expect(await page.getByRole("textbox", { name: "Passphrase", exact: true }).count()).toBe(0);
+  const rows = page.getByRole("option");
+  expect(await rows.count()).toBe(2);
+  expect(await rows.first().getAttribute("aria-selected")).toBe("true");
+  await page.getByRole("option", { name: /backup-1/ }).click();
+  await page.getByRole("heading", { name: "backup-1" }).waitFor();
+  await page.getByRole("button", { name: "Open SSH" }).click();
+  expect(await page.evaluate(() => window.authTest.opened())).toEqual({ scopeId: "work", name: "host:backup-1" });
   expect(await page.getByRole("button", { name: "Lock everything" }).isVisible()).toBe(true);
+  await page.keyboard.press("Escape");
+  await pill.waitFor();
+  expect(await page.evaluate(() => document.activeElement?.textContent)).toContain("2 active grants");
+  await pill.click();
+  await page.getByRole("button", { name: "Lock everything" }).click();
+  await pill.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Unlock", exact: true }).waitFor();
 }));
 
-test("unlock opens the grant summary when listing grants fails", () => withPage(async (page) => {
+test("a single grant reads as one active grant", () => withPage(async (page) => {
+  await page.evaluate(() => window.authTest.grants(1));
+  await page.getByRole("button", { name: "1 active grant", exact: true }).waitFor();
+}));
+
+test("the grants overview shows listing errors", () => withPage(async (page) => {
   await page.evaluate(() => window.authTest.grants(1, true));
-  const alert = page.locator(".auth-ssh-grants [role=alert]");
+  await page.getByRole("button", { name: "1 active grant", exact: true }).click();
+  const alert = page.getByRole("alert");
   await alert.waitFor();
   expect(await alert.isVisible()).toBe(true);
 }));
