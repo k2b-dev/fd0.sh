@@ -188,7 +188,7 @@ jobs:
             fi
           }
           assert_output_line "terminal runtime smoke" "fd0 terminal runtime ok" xvfb-run -a "$app" --fd0-terminal-runtime-smoke
-          assert_output_line "desktop CLI relay" "fd0 0.0.0 yubikey" "$app" --fd0-cli-relay version
+          assert_output_line "desktop CLI relay" "fd0 0.0.0 yubikey (desktop)" "$app" --fd0-cli-relay version
           browser_home=$(mktemp -d)
           mkdir -p "$browser_home/bin"
           browser_host="$browser_home/bin/fd0-browser-host"
