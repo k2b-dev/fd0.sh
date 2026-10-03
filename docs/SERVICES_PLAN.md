@@ -1,6 +1,6 @@
 # Services plan
 
-Status: phase 1 implemented 2026-10-01, phase 2 implemented 2026-10-02; phase 3 not started.
+Status: phase 1 implemented 2026-10-01, phase 2 implemented 2026-10-02; phase 3 planned (draft for review, 2026-10-03), not implemented.
 
 ## Outcome and scope
 
@@ -68,10 +68,55 @@ Only after phase 1 has proven itself. Deploying means the admin's SSH and cluste
   - `manual`: documentation only (settings set through an application API or another tool). `show` lists them in the rotation checklist.
   - Embedded uses (a credential inside a larger, validated config such as `named.conf` or `patroni.yml`) stay with their own tooling, which reads the value via `get --raw` or a rendered template on stdout.
 - **Approval:** a consumer is used only after a per-device approval with fresh authentication, like SSH grants. The approval pins the target record IDs, the SSH host-key fingerprints or the kube server URL and CA hash, the destination path, owner and mode. `deploy` refuses new or changed targets and shows the difference. This stops a scope member or an agent from redirecting a deploy.
-- **Hosts:** destination paths must fall under a prefix allowed on the host record, are absolute without `..`, and are passed as arguments, not shell text. One SSH subprocess per host (not `exec`), fd0's own SSH config with `ControlPath=none`, no TTY. Content goes over stdin into a temporary file created with umask 077 next to the destination and is moved into place with the approved owner and mode; failure removes it in the same session. Requires `sudo -n` for exactly that operation; sudo I/O logging on the target would record the value and must be off for it.
-- **Kubernetes:** `kubectl apply --server-side --field-manager=fd0-NAME`, kubeconfig for the one approved cluster passed through a file descriptor, never `--force-conflicts`. fd0 refuses to take over Secrets it does not label, non-Opaque types and protected namespaces. A tunnel endpoint may replace the server URL only with the same pinned CA.
+- **Hosts:** see the implementation plan below (SFTP, atomic rename, no sudo in the first cut).
+- **Kubernetes:** see the implementation plan below (verified TLS, ID-based ownership, conditional writes).
 - **Order and partial failure:** consumers deploy in their listed order and stop at the first failure; `show` lists which consumers have the current field revision. A device that is not synced to the latest revision refuses to deploy, so an old value cannot overwrite a newer rotation.
 - **Check:** reads the delivered bytes back into fd0's memory over the same SSH channel or the Kubernetes API and compares them in constant time. Results are `ok`, `drift` or `missing`; no hashes or values are printed. This means values travel back to the admin device, which already holds them.
+
+### Phase 3 implementation plan (draft 2026-10-03, revised after design review)
+
+**Smallest useful cut.** `managed` consumers of two kinds, `host-file` and `k8s-secret`, with `approve`, `deploy` and `check`. Not in the first cut: `bootstrap`, `manual`, reload commands, sudo, tunnel overrides, templates for embedded configs, machine-side pulls (those use `fd0 run` or machine identities).
+
+**Compatibility first.** Clients up to 0.20 drop unknown service fields when they save, so they would silently erase consumers. Step 0 ships before any consumer exists: a service payload version, preservation of unknown fields on every save and restore, and refusal to save a payload from a newer version. Consumers are only accepted in scopes after the documentation tells writers to update.
+
+**Model.** Consumers are part of the service payload, so every scope member sees where a value is used:
+
+```
+consumer = {
+  id      : "c_…",                        ; stable, generated
+  kind    : "host-file" / "k8s-secret",
+  mode    : "managed",
+  mapping : [FIELD=OUTPUT_KEY, …],         ; explicit, never a default
+  ; host-file
+  host    : host record ID, path, mode (e.g. "0600"),
+            format : "systemd-env" / "docker-env" / "sh" / "file",   ; file = exactly one file field
+  ; k8s-secret
+  kube    : kube record ID (its context), namespace, secret name,
+}
+```
+
+Host records gain an optional `deploy_prefixes` list. A destination must lie under one of them, compared by path components after resolving the existing parent directories without following symlinks. Approvals and deploy results are device-local vault fields next to `ssh_grants`, not synced.
+
+**Approval pins the resolved destination, not just IDs.** `fd0 service approve NAME` shows and pins, per consumer: scope, service record and consumer IDs; the mapping and format; for hosts the resolved connection (hostname, port, user, jump hosts, client key identity) and the server keys from the trusted `known_hosts` (never `ssh-keyscan` alone); for clusters the server URL, the CA bundle hash and the TLS settings. Value rotations need no new approval; any change to these pinned parts makes `deploy` and `check` refuse and print the difference. The connection is built from the approved specification, not re-resolved from records.
+
+**Deploy.**
+
+- Freshness: `deploy` syncs all involved scopes against the primary immediately before it prepares, and records which signed service event it delivers. This narrows but cannot remove the race between two devices deploying different revisions at the same moment; the docs say so, and the approver should be one device per service.
+- Hosts: delivery over SFTP with fd0's own SSH configuration (no remote shell), into an exclusively created temporary file in the destination directory, then an atomic rename. The SSH user must own or be allowed to write the destination directory; there is no sudo in the first cut. Owner and group are those of the SSH user; only the mode is set.
+- Kubernetes: HTTPS with certificate and hostname verification is required; a kubeconfig with `insecure-skip-tls-verify` or HTTP cannot be approved. fd0 owns the whole Secret, identified by annotations with scope, record and consumer IDs and the field manager `fd0-<consumer id>`. A missing Secret is created with create-only semantics; an existing one is updated only if its annotations match and with its observed `resourceVersion`, otherwise deploy fails. Type must be Opaque. Only the selected kube record's own config is used, never a merged user config.
+- Output: structured, bounded results per consumer. fd0 never forwards raw `kubectl`, API or SSH output, because error bodies can echo values. `--dry-run` is local: approved targets, mapping, the service event to deliver; nothing is sent.
+
+**Check** reads only the mapped outputs back over the approved connection and compares them in constant time: `ok`, `drift`, `missing`, or a distinct transport, authorization or validation error. Target-side logging is the operator's responsibility; the docs name Kubernetes audit logging of Secret bodies and SSH session logging as things to review.
+
+**Roles.** Consumers are edited by writers and admins like values. `approve`, `deploy` and `check` need only read access in fd0; the remote permissions come from the referenced SSH and kube credentials, which may themselves be shared in the scope. Approval stops a scope member from redirecting this device's deploys; it is not protection against code running as the same OS user.
+
+**Implementation steps** (each with tests and a Codex review): 0) payload version and unknown-field preservation, shipped in a release first; 1) consumer model, CLI editing, `show`; 2) approvals with fresh authentication; 3) `host-file` deploy and check against a local SSH test server; 4) `k8s-secret` deploy and check against a Kubernetes API test double; 5) docs, skill and a read-only Desktop list.
+
+**Open questions for Valentin.**
+
+1. Reload after deploy (for example `systemctl restart app`): leave out of the first cut and print the next step? Recommended: yes.
+2. Device-local deploy results (recommended) or a synced rollout state per consumer, which means every deploy writes an event?
+3. Is "the SSH user writes the destination directory, no sudo" workable for your hosts, or do you need a narrowly defined privileged step soon?
 
 ## Verification plan
 

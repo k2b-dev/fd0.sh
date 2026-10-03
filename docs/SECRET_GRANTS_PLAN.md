@@ -1,6 +1,6 @@
 # Secret grants plan
 
-Status: draft for review, 2026-10-01. Not implemented.
+Status: draft, reviewed 2026-10-03 (see Review). Not implemented.
 
 ## Outcome and scope
 
@@ -25,10 +25,10 @@ Grants must not weaken anything else: the vault identity, payload and scope keys
 
 ## Contract
 
-- **Selection:** scope ID, record name, and for pass items one field path whose type is `text` or `secret`. Resolve ambiguity before creating; never prefix-match.
+- **Selection:** scope ID, record name, and for pass items and services one field whose type is `text` or `secret`. Resolve ambiguity before creating; never prefix-match. The grant stores the record ID (see review).
 - **Creation:** `fd0 secret grant NAME --scope S [--field PATH] [--ttl DURATION]` while unlocked. Show scope, item, field, type and expiry, then require fresh authentication with the same method chooser as unlock. No `--yes`, no password flag, no organization-MCP tool.
 - **Use while locked:** the existing reads work unchanged: `fd0 secret get NAME --scope ID --raw` and `fd0 pass field get NAME PATH --scope ID --raw`. Exact names and scope IDs only. Anything not granted fails with exit code 3, as today.
-- **Value snapshot:** the agent captures the value at unlock. Changes that arrive later (rotation, sync) take effect at the next unlock. A deleted, moved or retyped field, or loss of scope membership observed locally, disables the grant until it is reviewed again.
+- **Value lifecycle and identity:** superseded by the review below (stable record IDs, refresh at unlock and on every vault write).
 - **Expiry:** every grant has an expiry; default 30 days, renewable with fresh authentication. Expired grants stay listed as expired until revoked.
 - **Stop and remove:** `fd0 lock --all` stops all grants until the next unlock. `fd0 secret revoke GRANT_ID` removes one (vault unlocked). Agent or computer restart clears released values until the next unlock.
 - **Inspection:** `fd0 secret grants [--json]` lists grant metadata, active state, expiry, release count and last release time. Never values.
@@ -40,6 +40,26 @@ Grants must not weaken anything else: the vault identity, payload and scope keys
 2. **Default expiry.** 30 days, or no default and an explicit `--ttl` every time?
 3. **File fields.** Leave out for now (recommended) or allow small attachments such as NATS creds?
 4. **Desktop.** Same "Allow while locked" section as for SSH hosts, or CLI only in the first version?
+
+## Review 2026-10-03
+
+**Still needed.** Machine identities and services, both shipped since this draft, do not replace it. A machine identity unlocks from a key file on disk, which is the plaintext-copy problem again for a consumer that runs as the user on the user's own device. Evidence from 2026-10-03 on the dev VM: the vault auto-locked twice during one session and each time `cld --profile agent-…` could no longer read its OAuth client secret; an SSH grant kept SSH working, nothing kept that one value.
+
+**Changes to the contract.**
+
+- **Selection includes service fields.** Credentials that programs read now live in services; a grant names a scope ID, a record name and, for pass items and services, one field of type `text` or `secret`. Reads while locked use the existing commands: `secret get --raw`, `pass field get … --raw`, `service get NAME FIELD --raw`.
+- **Stable identity.** A grant stores the record ID, kind, field path and field type next to the display name. Deleting, moving or replacing the record, or recreating the field, invalidates the grant until it is approved again; a new record with the same name never inherits it.
+- **Value lifecycle.** As with SSH grant keys, the agent refreshes granted values at unlock and after every committed vault write, so a rotation synced while unlocked is served after the next lock. A plain lock then only destroys the normal vault keys. `lock --all`, expiry (checked on every release), revocation and agent shutdown wipe released values. Locked reads go through a narrow agent operation that returns one granted value, not through the full session the CLI uses when unlocked.
+- **One grant model.** Store `secret_grants` next to `ssh_grants` (every reseal must preserve both) and reuse the same parts: device binding, fresh authentication, `lock --all`, the method chooser, list/revoke. `fd0 status` reports one active-grants count, and Desktop's lock-screen overview ("Active while locked") lists secret grants by name and expiry, without values, next to SSH hosts.
+
+**Answers to the open questions** (recommendations for Valentin):
+
+1. Caller binding: A, no binding, stated plainly. Same-user processes can impersonate any binding.
+2. Expiry: default 30 days, `--ttl` up to 365 days, no "never". Renewing needs fresh authentication; expired grants stay listed until revoked.
+3. File fields: still out. Small file fields (NATS creds) can follow once a consumer needs them; the size limit would match service file fields.
+4. Desktop: CLI creates and revokes in the first version; Desktop shows active secret grants read-only in the lock-screen overview and in Settings. Creating in Desktop follows the SSH grant section later.
+
+**Implementation steps** (each with tests and a Codex review): 1) vault field, agent refresh and the narrow release operation; 2) CLI `grant`/`grants`/`revoke` for secrets, pass and service fields; 3) locked reads in `secret get`, `pass field get`, `service get`; 4) status count and Desktop read-only list; 5) threat model, docs and skill.
 
 ## Verification plan
 
