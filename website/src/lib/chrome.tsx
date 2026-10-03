@@ -149,6 +149,8 @@ export type DocsKey =
   | "browser"
   | "ssh"
   | "talos"
+  | "services"
+  | "machines"
   | "server"
   | "yubikey"
   | "sync"
@@ -165,6 +167,8 @@ export const DOCS_NAV: { key: DocsKey; href: string; label: string; group: strin
   { key: "browser", href: "/docs/browser", label: "Browser extension", group: "Use" },
   { key: "ssh", href: "/docs/ssh", label: "SSH", group: "Use" },
   { key: "talos", href: "/docs/talos", label: "Talos & Kube", group: "Use" },
+  { key: "services", href: "/docs/services", label: "Services", group: "Use" },
+  { key: "machines", href: "/docs/machines", label: "Machines & CI", group: "Use" },
   { key: "sync", href: "/docs/sync", label: "Sync", group: "Use" },
   { key: "server", href: "/docs/server", label: "Self-host server", group: "Deploy" },
   { key: "yubikey", href: "/docs/yubikey", label: "YubiKey unlock", group: "Hardware" },

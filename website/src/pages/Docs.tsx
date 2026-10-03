@@ -143,6 +143,8 @@ const OverviewBody = () => (
       <Tile href="/docs/browser" title="Browser extension" body="Install fd0 for Chrome and fill HTTPS logins without submitting the form." />
       <Tile href="/docs/ssh" title="SSH and files" body="Scope-shared SSH hosts, terminal sessions, and two-way SFTP transfers." />
       <Tile href="/docs/talos" title="Talos and Kube" body="Store, render, merge, and share Talos and Kubernetes configs." />
+      <Tile href="/docs/services" title="Services" body="Credentials programs read, handed over as env files, Kubernetes Secrets, or fd0 run." />
+      <Tile href="/docs/machines" title="Machines and CI" body="Give a CI runner or deploy host its own identity with read-only access." />
       <Tile href="/docs/sync" title="Sync" body="What sync sends, what it verifies, and how automatic refresh works." />
       <Tile href="/docs/server" title="Self-host" body="Run a primary, add a DR backup, and know where the full runbook lives." />
       <Tile href="/docs/troubleshooting" title="Troubleshooting" body="Locked vaults, stale SSH sockets, missing hosts, and config refresh." />
@@ -899,6 +901,34 @@ $ fd0 secret list`}</Box>
     <Cmd signature="fd0 scope add-member <label> --scope <scope>" body="Grant a pinned card access to the scope." />
     <Cmd signature="fd0 scope remove-member <label> --scope <scope>" body="Remove access and rotate the scope key." />
 
+    <H2 id="roles">Roles</H2>
+    <P>
+      Every member can read every item in the scope. A role limits what a
+      member may change. Members without an explicit role are admins, so
+      existing scopes keep working as before.
+    </P>
+    <Box>{`role     read   change items   change members and roles
+admin    yes    yes            yes
+writer   yes    yes            no
+reader   yes    no             no`}</Box>
+    <Box>{`$ fd0 scope add-member ci-runner --scope deploy --role reader
+$ fd0 scope role ci-runner writer --scope deploy
+$ fd0 scope members deploy`}</Box>
+    <P>
+      The server and every member's client check roles against the signed
+      scope history, so a modified client or server cannot slip in a change
+      the role forbids. A scope always keeps at least one admin: the last admin
+      can neither leave nor demote themselves while other members remain.
+      Writers and readers cannot leave on their own; <Code>fd0 scope leave</Code>{" "}
+      hides the scope on that device, and an admin removes them.
+    </P>
+    <Note>
+      Roles do not limit reading. To take away read access, remove the member
+      and rotate the values they could see. Assigning writer or reader needs
+      fd0 0.19.0 or later and a server with role support (fd0.sh has it);
+      update every device in the scope first.
+    </Note>
+
     <H2>Unlock methods</H2>
     <P>
       Auth methods are stored in the vault. The default unlock method is a
@@ -1089,6 +1119,157 @@ $ kubectl --kubeconfig ~/.kube/config.fd0 get nodes`}</Box>
   </>
 );
 
+const ServicesBody = () => (
+  <>
+    <P>
+      A service holds the credentials one program reads: database passwords,
+      API tokens, certificates, config values. Each field has a type, an
+      optional environment variable name, and a change date. Use{" "}
+      <Link href="/docs/pass">pass</Link> for logins people use and{" "}
+      <Code>service</Code> for values software reads. fd0 stays on your admin
+      device; it renders values for the tools you already use and installs
+      nothing on servers or clusters.
+    </P>
+    <Note>
+      Services need fd0 0.19.0 or later (Desktop 0.8.0). Older versions show a
+      service as a plain secret and can delete it. Update every device that
+      shares the scope before you add services there.
+    </Note>
+
+    <H2>Create a service</H2>
+    <Box>{`$ fd0 service add pg-1 --scope ops --description "Postgres cluster"
+$ openssl rand -base64 32 | fd0 service set pg-1 db-password - --env DB_PASSWORD
+$ printf eu-central | fd0 service set pg-1 region - --type text --env REGION
+$ fd0 service set pg-1 ca.crt - --type file < ca.crt
+$ fd0 service set pg-1 --env-file - < app.env     # every KEY=VALUE line
+$ fd0 service show pg-1`}</Box>
+    <P>
+      Values come only from stdin (<Code>-</Code>), never from arguments, so
+      they do not end up in shell history or process lists. Field types are{" "}
+      <Code>secret</Code> (default, masked in <Code>show</Code>),{" "}
+      <Code>text</Code> (shown), and <Code>file</Code> (bytes, masked). A
+      field keeps its type; setting the same value again records no change.
+    </P>
+
+    <H2>Hand values to a program</H2>
+    <Cmd
+      signature="fd0 run --service <name> [--field <f>] -- <command>"
+      body="Run the command with the service's env-named fields in its environment. fd0 is replaced by the command, so its exit status and signals are the command's own."
+      example={`$ fd0 run --service pg-1 -- ./migrate.sh`}
+    />
+    <Cmd
+      signature="fd0 service env <name> --format systemd-env|docker-env|sh"
+      body="Print the env-named fields as an environment file. Pick the format the consumer parses; values a format cannot represent are refused instead of written wrongly."
+      example={`$ fd0 service env pg-1 --format systemd-env \\
+    | ssh db-1 'sudo install -m 600 /dev/stdin /etc/app.env'`}
+    />
+    <Cmd
+      signature="fd0 service k8s-secret <name> -n <namespace> --name <secret>"
+      body="Print an Opaque Kubernetes Secret. Use --key FIELD=KEY to choose and rename keys; the default is every field under its own name."
+      example={`$ fd0 service k8s-secret pg-1 -n app --name pg \\
+    --key db-password=DATABASE_PASSWORD \\
+  | kubectl apply --server-side --field-manager=fd0-pg-1 -f -`}
+    />
+    <Cmd
+      signature="fd0 service get <name> <field> --raw"
+      body="Print one value, for tools that read a single value. --raw omits the trailing newline. File fields are never printed to a terminal."
+    />
+    <P>
+      <Code>service env</Code> and <Code>k8s-secret</Code> refuse to print to
+      a terminal; pipe them into the next command. That prevents accidents on screen, nothing more: anything that
+      can run fd0 with your unlocked vault can read the values. With{" "}
+      <Code>fd0 run</Code>, the values are readable by other processes of the
+      same user and inherited by child processes, like any environment
+      variable.
+    </P>
+
+    <H2>Change and roll back</H2>
+    <Box>{`$ openssl rand -base64 32 | fd0 service set pg-1 db-password -
+$ fd0 service show pg-1          # revision and change date per field
+$ fd0 service history show pg-1
+$ fd0 service history restore pg-1 <seq>`}</Box>
+    <P>
+      fd0 changes the stored value only. Deploy the new value with the
+      commands above, then restart or reload the program that reads it.
+    </P>
+  </>
+);
+
+const MachinesBody = () => (
+  <>
+    <P>
+      A CI runner, deploy host, or scheduled job can use fd0 with its own
+      identity instead of a person's unlocked vault or a copied secret. The
+      machine identity is an ordinary fd0 identity that unlocks with a key
+      file and is a member of only the scopes it needs.
+    </P>
+
+    <H2>Create the machine identity</H2>
+    <P>
+      Run these as a dedicated service user that owns the identity's
+      directory. Separate directories under one user do not keep processes
+      apart. Create the key outside fd0, for example as a systemd credential.
+    </P>
+    <Box>{`$ export FD0_HOME=/var/lib/ci/fd0
+$ umask 077; head -c 32 /dev/urandom | base64 > /etc/ci/fd0.key
+$ fd0 init --key-file /etc/ci/fd0.key
+$ fd0 unlock --key-file /etc/ci/fd0.key`}</Box>
+    <P>
+      The key file must be a regular file owned by that user or root, not
+      readable by group or others, and hold at least 32 bytes. Use{" "}
+      <Code>-</Code> to read it from stdin. With a key file, fd0 never falls
+      back to a prompt.
+    </P>
+
+    <H2>Pin the server</H2>
+    <Box>{`$ fd0 sync                               # refuses and prints the safety number
+$ fd0 sync --pin "12345 67890 ..."       # pins only if the number matches`}</Box>
+    <P>
+      Compare the printed safety number with one you trust, such as the number
+      your own device showed when it first connected to the same server.{" "}
+      <Code>--pin</Code> refuses a server whose number differs, on first
+      contact and later. Background sync never pins a server by itself.
+    </P>
+
+    <H2>Give it access</H2>
+    <Box>{`# on the machine
+$ fd0 card export
+
+# on your device
+$ fd0 card import "fd0://card/..." --label ci-runner
+$ fd0 scope add-member ci-runner --scope deploy --role reader
+$ fd0 sync
+
+# on the machine
+$ fd0 sync`}</Box>
+    <P>
+      Add the machine as <Code>reader</Code>, or <Code>writer</Code> if it
+      rotates the values it uses. Neither can change who has access; see{" "}
+      <Link href="/docs/cli#roles">roles</Link>. Prefer a scope that holds only this
+      machine's credentials, because every member can read everything in the
+      scope.
+    </P>
+
+    <H2>Use it in a job</H2>
+    <Box>{`$ fd0 unlock --key-file "$CREDENTIALS_DIRECTORY/fd0.key"
+$ fd0 sync
+$ fd0 run --service app --scope deploy -- ./deploy.sh`}</Box>
+    <P>
+      <Code>fd0 unlock --key-file</Code> returns at once when the vault is
+      already unlocked and unlocks again after a timeout, so run it at the
+      start of every job.
+    </P>
+
+    <H2>Revoke a machine</H2>
+    <P>
+      Remove it from its scopes with{" "}
+      <Code>fd0 scope remove-member ci-runner --scope deploy</Code>, then
+      rotate every value it could read. One identity per machine and purpose;
+      never copy its fd0 directory to another host.
+    </P>
+  </>
+);
+
 const SyncBody = () => (
   <>
     <P>
@@ -1152,7 +1333,7 @@ $ cd fd0-server
 $ curl -fsSLO https://fd0.sh/files/compose.yml
 $ umask 077
 $ printf 'METRICS_TOKEN=%s\\n' "$(openssl rand -hex 32)" > .env
-$ case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\\n' 'ghcr.io/valentinkolb/fd0-server:latest-arm64' >> .env ;; esac
+$ case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\\n' 'ghcr.io/k2b-dev/fd0-server:latest-arm64' >> .env ;; esac
 $ docker compose up -d`}</Box>
     <P>
       This starts one <Code>fd0-server</Code> on localhost port{" "}
@@ -1387,6 +1568,24 @@ export const DocsTalos = ssr(async (c) => {
   return () => (
     <DocsLayout current="talos" title="Talos and Kube" kicker="Integration">
       <TalosKubeBody />
+    </DocsLayout>
+  );
+});
+
+export const DocsServices = ssr(async (c) => {
+  setPageSeo(c, "docsServices");
+  return () => (
+    <DocsLayout current="services" title="Services" kicker="Integration">
+      <ServicesBody />
+    </DocsLayout>
+  );
+});
+
+export const DocsMachines = ssr(async (c) => {
+  setPageSeo(c, "docsMachines");
+  return () => (
+    <DocsLayout current="machines" title="Machines and CI" kicker="Integration">
+      <MachinesBody />
     </DocsLayout>
   );
 });

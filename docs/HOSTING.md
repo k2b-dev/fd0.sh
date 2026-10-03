@@ -6,7 +6,7 @@ Reference for the public hosted instance — `https://fd0.sh`, `https://api.fd0.
 
 - Legal entity: **Kolb Antik GmbH**, Germany ([kolb-antik.com](https://kolb-antik.com))
 - Jurisdiction: German civil and commercial law, DSGVO/GDPR
-- Source of truth: this repository; published Docker images at `ghcr.io/valentinkolb/`
+- Source of truth: this repository; published Docker images at `ghcr.io/k2b-dev/` (server, website) and `ghcr.io/valentinkolb/` (witness)
 
 ## Topology
 
@@ -103,7 +103,7 @@ cd fd0-server
 curl -fsSLO https://fd0.sh/files/compose.yml
 umask 077
 printf 'METRICS_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env
-case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/valentinkolb/fd0-server:latest-arm64' >> .env ;; esac
+case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/k2b-dev/fd0-server:latest-arm64' >> .env ;; esac
 docker compose up -d
 ```
 

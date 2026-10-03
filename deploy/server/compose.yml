@@ -6,7 +6,7 @@
 #   curl -fsSLO https://fd0.sh/files/compose.yml
 #   umask 077
 #   printf 'METRICS_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env
-#   case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/valentinkolb/fd0-server:latest-arm64' >> .env ;; esac
+#   case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/k2b-dev/fd0-server:latest-arm64' >> .env ;; esac
 #   docker compose up -d
 #
 # Health check:
@@ -16,14 +16,14 @@
 # Put your own TLS terminator in front before pointing real clients at it.
 #
 # Image tags are per architecture today:
-#   amd64: ghcr.io/valentinkolb/fd0-server:latest
-#   arm64: ghcr.io/valentinkolb/fd0-server:latest-arm64
+#   amd64: ghcr.io/k2b-dev/fd0-server:latest
+#   arm64: ghcr.io/k2b-dev/fd0-server:latest-arm64
 # Override with FD0_SERVER_IMAGE in .env. Pin a released tag for production.
 
 services:
   fd0-server:
     # Override with FD0_SERVER_IMAGE in .env.
-    image: ${FD0_SERVER_IMAGE:-ghcr.io/valentinkolb/fd0-server:latest}
+    image: ${FD0_SERVER_IMAGE:-ghcr.io/k2b-dev/fd0-server:latest}
     env_file:
       - .env
     restart: unless-stopped

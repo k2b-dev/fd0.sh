@@ -24,7 +24,7 @@ cd fd0-server
 curl -fsSLO https://fd0.sh/files/compose.yml
 umask 077
 printf 'METRICS_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env
-case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/valentinkolb/fd0-server:latest-arm64' >> .env ;; esac
+case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/k2b-dev/fd0-server:latest-arm64' >> .env ;; esac
 docker compose up -d
 curl http://localhost:4048/health
 docker compose logs fd0-server | grep server_pub_hex
@@ -36,7 +36,7 @@ From this repository:
 cd deploy/server
 umask 077
 printf 'METRICS_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env
-case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/valentinkolb/fd0-server:latest-arm64' >> .env ;; esac
+case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\n' 'ghcr.io/k2b-dev/fd0-server:latest-arm64' >> .env ;; esac
 docker compose up -d
 curl http://localhost:4048/health
 docker compose logs fd0-server | grep server_pub_hex

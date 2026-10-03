@@ -999,7 +999,7 @@ bunx skills add k2b-dev/fd0.sh`}</Shell>
 curl -fsSLO https://fd0.sh/files/compose.yml
 umask 077
 printf 'METRICS_TOKEN=%s\\n' "$(openssl rand -hex 32)" > .env
-case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\\n' 'ghcr.io/valentinkolb/fd0-server:latest-arm64' >> .env ;; esac
+case "$(uname -m)" in arm64|aarch64) printf 'FD0_SERVER_IMAGE=%s\\n' 'ghcr.io/k2b-dev/fd0-server:latest-arm64' >> .env ;; esac
 docker compose up -d`}
             codeNote="One primary per client — clients set [sync].server. For redundancy run a standby with FD0_REPLICATE_FROM=<primary> (the primary lists it in FD0_PEERS); it mirrors the primary read-only for disaster recovery."
           />

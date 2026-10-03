@@ -24,6 +24,8 @@ import {
   DocsBrowser,
   DocsSsh,
   DocsTalos,
+  DocsServices,
+  DocsMachines,
   DocsSync,
   DocsServer,
   DocsYubikey,
@@ -362,6 +364,8 @@ const app = new Hono()
   .get("/docs/browser", ...DocsBrowser)
   .get("/docs/ssh", ...DocsSsh)
   .get("/docs/talos", ...DocsTalos)
+  .get("/docs/services", ...DocsServices)
+  .get("/docs/machines", ...DocsMachines)
   .get("/docs/sync", ...DocsSync)
   .get("/docs/server", ...DocsServer)
   .get("/docs/yubikey", ...DocsYubikey)

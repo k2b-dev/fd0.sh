@@ -113,6 +113,22 @@ export const SEO_ROUTE = {
       "Store, render, merge, and share Talos contexts, Kubernetes kubeconfigs, and day-0 Talos recovery credentials with fd0.",
     section: "docs",
   },
+  docsServices: {
+    key: "docsServices",
+    path: "/docs/services",
+    title: "fd0 services: credentials that programs read",
+    description:
+      "Keep database passwords, API tokens, and certificates in fd0 services and hand them to programs as env files, Kubernetes Secrets, or with fd0 run.",
+    section: "docs",
+  },
+  docsMachines: {
+    key: "docsMachines",
+    path: "/docs/machines",
+    title: "fd0 for machines and CI",
+    description:
+      "Give CI runners and deploy hosts their own fd0 identity with a key file, a pinned server, and read-only access to the scopes they need.",
+    section: "docs",
+  },
   docsSync: {
     key: "docsSync",
     path: "/docs/sync",
@@ -238,6 +254,8 @@ export const SEO_ROUTES = [
   SEO_ROUTE.docsBrowser,
   SEO_ROUTE.docsSsh,
   SEO_ROUTE.docsTalos,
+  SEO_ROUTE.docsServices,
+  SEO_ROUTE.docsMachines,
   SEO_ROUTE.docsSync,
   SEO_ROUTE.docsServer,
   SEO_ROUTE.docsYubikey,
