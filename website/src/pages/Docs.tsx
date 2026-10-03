@@ -496,8 +496,12 @@ const DesktopBody = () => (
           "Cluster credentials alongside everything else, rendered to disk by the same sync that pulls them.",
         ],
         [
+          "Services",
+          "The credentials programs read, shown with masked values, field types, and change dates. Create and change them with fd0 service.",
+        ],
+        [
           "Sharing",
-          "Move an item into a shared scope and the scope's members get it on their next sync. Removing a member rotates the scope key.",
+          "Move an item into a shared scope and the scope's members get it on their next sync. Manage access sets each member's role: admin, writer, or reader. Removing a member rotates the scope key.",
         ],
         [
           "History",
@@ -1007,7 +1011,9 @@ $ fd0 ssh revoke GRANT_ID`}</Box>
       Unlock once after a computer or agent restart to activate them again.
       Ordinary locking leaves approved SSH access available; <Code>fd0 lock --all</Code>
       also stops active grants until the next unlock. Existing connections stay open.
-      The lock screen shows active grants and offers <strong>Lock everything</strong>.
+      While grants are active, the lock screen shows <strong>N active grants</strong>;
+      it opens an overview of those hosts with <strong>Open SSH</strong> and{" "}
+      <strong>Lock everything</strong>.
     </P>
     <Note>
       Locked access requires OpenSSH session binding and host-bound authentication.

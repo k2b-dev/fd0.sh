@@ -32,8 +32,9 @@ verification to get a grant accepted. `--known-hosts PATH` selects a different
 trusted file. `--method passphrase` or `--method yubikey` selects authentication.
 
 In Desktop, open the host's **SSH while locked** section, review the grant, and
-choose **Authenticate and allow**. The lock screen lists active grants and can
-open their SSH sessions.
+choose **Authenticate and allow**. While grants are active, the lock screen shows
+**N active grants**; it opens an overview with **Open SSH** per host and **Lock
+everything**. Removing a grant needs an unlocked vault.
 
 ## Locking and removal
 

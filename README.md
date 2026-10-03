@@ -26,6 +26,10 @@ the terminal, or both.
   instead of copied between machines.
 - **Secrets:** API keys, deploy tokens, connection strings, licence keys, and
   other opaque values.
+- **Services:** the credentials one program reads, handed over as env files,
+  Kubernetes Secrets, or directly with `fd0 run`.
+- **Machines:** CI runners and deploy hosts with their own identity, a key
+  file instead of a person, and reader or writer access to one scope.
 
 Every record type uses the same scopes, version history, sync, and recovery
 model.
@@ -125,6 +129,8 @@ credentials. Installing a skill alone does not enforce that boundary.
 - [Store passwords and login items](https://fd0.sh/docs/pass)
 - [Use SSH keys and host aliases](https://fd0.sh/docs/ssh)
 - [Store Talos and Kubernetes credentials](https://fd0.sh/docs/talos)
+- [Hand credentials to programs with services](https://fd0.sh/docs/services)
+- [Give machines and CI their own access](https://fd0.sh/docs/machines)
 - [Share scopes and sync devices](https://fd0.sh/docs/sync)
 - [Recover a vault](https://fd0.sh/docs/recovery)
 - [Browse the CLI reference](https://fd0.sh/docs/cli)

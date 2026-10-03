@@ -1,6 +1,6 @@
 # fd0 Desktop
 
-fd0 Desktop is the Electron and SolidJS client for the existing fd0 agent. It presents passwords, general secrets, SSH access and remote files, kubeconfigs, and Talos contexts without moving private-key ownership into the renderer.
+fd0 Desktop is the Electron and SolidJS client for the existing fd0 agent. It presents passwords, general secrets, SSH access and remote files, kubeconfigs, Talos contexts, and services (read-only), plus vault sharing with admin, writer and reader roles, without moving private-key ownership into the renderer.
 
 ## Architecture
 

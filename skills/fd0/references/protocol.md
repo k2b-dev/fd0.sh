@@ -34,6 +34,8 @@ For each scope member, the OEK is wrapped (via X25519 sealed-box) to that member
 
 The cryptographic consequence: after `remove-member`, any secret written under the new OEK cannot be decrypted by the removed member, even if they intercept the ciphertext from the wire. This is what "cryptographic membership" means.
 
+Members can have a role: `admin` (default; changes values and membership), `writer` (changes values) or `reader` (reads only). The server and every client check the role of each event's author against the signed scope chain, and a scope always keeps at least one admin. A role change is a `member.change op=role` event without key rotation, because it does not change who can read. Roles never limit reading.
+
 Caveat the agent must explain to users: removal does NOT retroactively un-leak secrets the removed member already read. Treat anything they had access to before removal as compromised and rotate the underlying credentials (the actual GitHub token, the actual database password) out-of-band.
 
 ## Events and chains

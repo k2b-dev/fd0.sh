@@ -96,7 +96,7 @@ fd0 item rename ITEM_ID --scope work --name new-name
 fd0 item move ITEM_ID --scope work --to-scope archive
 ```
 
-Types are `pass`, `secret`, `ssh` (hosts), `key`, `kube`, and `talos`. Repeated
+Types are `pass`, `secret`, `ssh` (hosts), `key`, `kube`, `talos`, and `service`. Repeated
 `--tag` filters require every tag. `item list --json` is metadata only; this
 still does not restrict an agent that can run other commands.
 
