@@ -84,7 +84,7 @@ try:
     assert len(groups) >= 12, refused.stderr
     # The person's own device shows the number it pinned; that is the trusted
     # source the machine is checked against.
-    status = json.loads(run(person, 'status', '--json').stdout)
+    status = json.loads(run(person, 'status', '--servers', '--json').stdout)
     pinned = [srv for srv in status.get('servers', []) if srv['url'] == url]
     assert len(pinned) == 1, status
     safety = ' '.join(pinned[0]['safetyNumber'].split())

@@ -1229,12 +1229,12 @@ $ fd0 unlock --key-file /etc/ci/fd0.key`}</Box>
 
     <H2>Pin the server</H2>
     <Box>{`# on your device: the server and safety number it pinned
-$ fd0 status
+$ fd0 status --servers
 
 # on the machine
 $ fd0 sync --pin "12345 67890 ..."`}</Box>
     <P>
-      Take the safety number from <Code>fd0 status</Code> on a device that
+      Take the safety number from <Code>fd0 status --servers</Code> on a device that
       already uses the same server. <Code>--pin</Code> pins the server only if
       the numbers match, and refuses a server whose number differs later.
       Background sync never pins a server by itself.

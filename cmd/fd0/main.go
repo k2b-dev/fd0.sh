@@ -862,7 +862,8 @@ type lockCmd struct {
 	All bool `name:"all" help:"Also stop active SSH grants until the next unlock."`
 }
 type statusCmd struct {
-	JSON bool `name:"json" help:"Print agent state as JSON."`
+	JSON    bool `name:"json" help:"Print agent state as JSON."`
+	Servers bool `name:"servers" help:"Also list pinned servers with their safety numbers (reads the unlocked vault, which counts as activity)."`
 }
 type agentCmd struct {
 	Status  agentStatusCmd  `cmd:"" help:"Show fd0-agent process, vault, and SSH socket state."`
@@ -1302,7 +1303,7 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 	case "agent stop":
 		return cli.RunAgentStop(ctx)
 	case "status":
-		return cli.RunStatus(ctx, c.Status.JSON)
+		return cli.RunStatus(ctx, c.Status.JSON, c.Status.Servers)
 	case "get", "get <name>":
 		return cli.RunGet(ctx, c.Get.Scope, c.Get.Name, c.Get.Raw)
 	case "copy", "copy <name>":

@@ -592,7 +592,9 @@ func pinnedServers(ctx context.Context) ([]pinnedStatus, error) {
 }
 
 // RunStatus prints agent state.
-func RunStatus(ctx context.Context, asJSON bool) error {
+// Pinned servers are read only on request: opening the vault refreshes the
+// agent's idle timer, and status is often polled.
+func RunStatus(ctx context.Context, asJSON, withServers bool) error {
 	paths, err := fdhome.Resolve()
 	if err != nil {
 		return err
@@ -610,7 +612,7 @@ func RunStatus(ctx context.Context, asJSON bool) error {
 		return err
 	}
 	var servers []pinnedStatus
-	if st.Unlocked {
+	if st.Unlocked && withServers {
 		if servers, err = pinnedServers(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not read pinned servers: %v\n", err)
 		}

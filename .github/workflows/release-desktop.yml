@@ -257,7 +257,7 @@ jobs:
             fi
           }
           assert_output_line "terminal runtime smoke" "fd0 terminal runtime ok" xvfb-run -a "$app" --fd0-terminal-runtime-smoke
-          assert_output_line "desktop CLI relay" "fd0 ${{ steps.version.outputs.version }} yubikey" "$app" --fd0-cli-relay version
+          assert_output_line "desktop CLI relay" "fd0 ${{ steps.version.outputs.version }} yubikey (desktop)" "$app" --fd0-cli-relay version
           if "$app" --fd0-cli-relay update --check > update-check.txt 2>&1; then
             echo "::error::desktop-managed update --check unexpectedly succeeded"
             exit 1

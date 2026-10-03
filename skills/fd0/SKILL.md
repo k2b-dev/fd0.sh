@@ -324,7 +324,7 @@ export FD0_HOME=/var/lib/ci/fd0
 head -c 32 /dev/urandom | base64 | install -o ci -m 0400 /dev/stdin /etc/credstore/ci-fd0.key  # once, by an admin
 fd0 init --key-file /etc/credstore/ci-fd0.key
 fd0 unlock --key-file /etc/credstore/ci-fd0.key      # never prompts; no-op when already unlocked
-fd0 sync --pin "SAFETY NUMBER"                        # from `fd0 status` on a device already using that server
+fd0 sync --pin "SAFETY NUMBER"                        # from `fd0 status --servers` on a device already using that server
 fd0 card export                                       # a person imports this card and runs scope add-member
 ```
 
