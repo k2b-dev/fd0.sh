@@ -37,7 +37,11 @@ jobs:
         run: |
           bash scripts/check-release-policy.sh
           cd desktop
-          bun audit
+          # GHSA-ch52-4w7c-c8xp (http-cache-semantics <= 4.2.0, no patched release yet)
+          # is reached only through the devDependencies electron and electron-builder
+          # while downloading Electron at build time; it is not in the packaged app.
+          # Remove the ignore once a fixed version exists.
+          bun audit --ignore=GHSA-ch52-4w7c-c8xp
 
       - name: test Go packages
         run: go test ./...
