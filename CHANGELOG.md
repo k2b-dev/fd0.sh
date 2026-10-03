@@ -16,6 +16,12 @@ as before.
 Tags before `client-v0.0.5` used the unified `vX.Y.Z` scheme (one
 release shipped all artefacts together) and are retained as-is.
 
+From 0.20.0, the CLI and fd0 Desktop share one version number: every
+client release tags `client-vX.Y.Z` and `desktop-vX.Y.Z` on the same
+commit, even when only one of them changed. The CLI bundled with Desktop
+prints `fd0 X.Y.Z <flavor> (desktop)` because Desktop updates it.
+Server, witness and website keep their own numbers.
+
 ## client-v0.6.0 — 2026-06-25
 
 Single-primary write model (A1). The client now writes and reads exactly

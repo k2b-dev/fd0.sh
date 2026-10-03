@@ -105,3 +105,12 @@ func TestRunParsesCommandAndNeedsUnlock(t *testing.T) {
 		t.Fatalf("parsed %+v", command.Run)
 	}
 }
+
+func TestVersionLineNamesDesktopDistribution(t *testing.T) {
+	if got := versionLine("0.20.0", "yubikey", "standalone"); got != "fd0 0.20.0 yubikey" {
+		t.Fatalf("standalone: %q", got)
+	}
+	if got := versionLine("0.20.0", "yubikey", "desktop"); got != "fd0 0.20.0 yubikey (desktop)" {
+		t.Fatalf("desktop: %q", got)
+	}
+}

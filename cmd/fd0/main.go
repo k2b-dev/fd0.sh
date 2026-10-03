@@ -1392,7 +1392,7 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 	case "auth rm <id>":
 		return cli.RunAuthRemove(ctx, c.Auth.Remove.ID, c.Auth.Remove.Yes)
 	case "version":
-		fmt.Printf("fd0 %s %s\n", version, buildinfo.Flavor)
+		fmt.Println(versionLine(version, buildinfo.Flavor, distribution))
 		return nil
 	case "update":
 		return cli.RunUpdate(ctx, cli.UpdateOptions{
@@ -1862,4 +1862,14 @@ func resolveClipboardClear(flag string) (time.Duration, error) {
 		}
 	}
 	return 30 * time.Second, nil
+}
+
+// versionLine is the `fd0 version` output. The CLI bundled with fd0 Desktop
+// says so, because Desktop, not `fd0 update`, updates it.
+func versionLine(version, flavor, distribution string) string {
+	line := "fd0 " + version + " " + flavor
+	if distribution == "desktop" {
+		line += " (desktop)"
+	}
+	return line
 }

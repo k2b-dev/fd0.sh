@@ -145,11 +145,11 @@ jobs:
           app=$(find dist -type d -name fd0.app -print -quit)
           test -n "$app"
           test "$("$app/Contents/MacOS/fd0" --fd0-terminal-runtime-smoke)" = "fd0 terminal runtime ok"
-          test "$("$app/Contents/Resources/bin/fd0" version)" = "fd0 ${{ steps.version.outputs.version }} yubikey"
+          test "$("$app/Contents/Resources/bin/fd0" version)" = "fd0 ${{ steps.version.outputs.version }} yubikey (desktop)"
           test "$("$app/Contents/Resources/bin/fd0-agent" --version)" = "fd0-agent ${{ steps.version.outputs.version }} yubikey"
           test -x "$app/Contents/Resources/bin/fd0-sftp-bridge"
           test -x "$app/Contents/Resources/bin/fd0-browser-host"
-          test "$("$app/Contents/MacOS/fd0" --fd0-cli-relay version)" = "fd0 ${{ steps.version.outputs.version }} yubikey"
+          test "$("$app/Contents/MacOS/fd0" --fd0-cli-relay version)" = "fd0 ${{ steps.version.outputs.version }} yubikey (desktop)"
           if "$app/Contents/MacOS/fd0" --fd0-cli-relay update --check > update-check.txt 2>&1; then
             echo "::error::desktop-managed update --check unexpectedly succeeded"
             exit 1
@@ -309,10 +309,10 @@ jobs:
           set -euo pipefail
           app=$(find release -maxdepth 1 -type f -name '*.AppImage' -print -quit)
           chmod +x "$app"
-          test "$("$app" --fd0-cli-relay version)" = "fd0 ${GITHUB_REF_NAME#desktop-v} yubikey"
+          test "$("$app" --fd0-cli-relay version)" = "fd0 ${GITHUB_REF_NAME#desktop-v} yubikey (desktop)"
           test "$("$app" --fd0-agent-relay --version)" = "fd0-agent ${GITHUB_REF_NAME#desktop-v} yubikey"
           # Match the managed service's NoNewPrivileges setting (issue #20).
-          test "$(APPIMAGE_EXTRACT_AND_RUN=1 setpriv --no-new-privs "$app" --fd0-cli-relay version)" = "fd0 ${GITHUB_REF_NAME#desktop-v} yubikey"
+          test "$(APPIMAGE_EXTRACT_AND_RUN=1 setpriv --no-new-privs "$app" --fd0-cli-relay version)" = "fd0 ${GITHUB_REF_NAME#desktop-v} yubikey (desktop)"
           test "$(APPIMAGE_EXTRACT_AND_RUN=1 setpriv --no-new-privs "$app" --fd0-agent-relay --version)" = "fd0-agent ${GITHUB_REF_NAME#desktop-v} yubikey"
           {
             echo "native AppImage: pass"
