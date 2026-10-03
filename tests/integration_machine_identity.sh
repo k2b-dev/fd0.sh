@@ -8,7 +8,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/integration_isolation.
 fd0_test_require_isolation
 trap fd0_test_stop_agents EXIT
 python3 - <<'PY'
-import os, pathlib, re, socket, subprocess, time, urllib.request
+import json, os, pathlib, re, socket, subprocess, time, urllib.request
 root = pathlib.Path(os.environ['FD0_TEST_ROOT'])
 cli = os.environ['FD0']
 server_bin = str(pathlib.Path(os.environ['HOME']) / 'go/bin/fd0-server')
@@ -82,7 +82,13 @@ try:
     assert 'first-contact pinning required' in refused.stderr, refused.stderr
     groups = re.findall(r'\b\d{5}\b', refused.stderr.split('Server fingerprint', 1)[-1])
     assert len(groups) >= 12, refused.stderr
-    safety = ' '.join(groups[:12])
+    # The person's own device shows the number it pinned; that is the trusted
+    # source the machine is checked against.
+    status = json.loads(run(person, 'status', '--json').stdout)
+    pinned = [srv for srv in status.get('servers', []) if srv['url'] == url]
+    assert len(pinned) == 1, status
+    safety = ' '.join(pinned[0]['safetyNumber'].split())
+    assert safety == ' '.join(groups[:12]), (safety, groups[:12])
     wrong = ' '.join(['00000'] * 12)
     assert 'does not match --pin' in run(machine, 'sync', '--pin', wrong, success=False).stderr
     run(machine, 'sync', '--pin', safety)

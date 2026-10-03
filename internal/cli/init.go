@@ -558,9 +558,37 @@ func RunLock(ctx context.Context) error {
 
 // statusJSON is the machine-readable `fd0 status --json` shape.
 type statusJSON struct {
-	Agent         string `json:"agent"` // "running" or "not_running"
-	Unlocked      bool   `json:"unlocked"`
-	SSHGrantCount int    `json:"sshGrantCount"`
+	Agent         string         `json:"agent"` // "running" or "not_running"
+	Unlocked      bool           `json:"unlocked"`
+	SSHGrantCount int            `json:"sshGrantCount"`
+	Servers       []pinnedStatus `json:"servers,omitempty"`
+}
+
+// pinnedStatus is a pinned server and its safety number, so another device
+// (for example a machine identity using `fd0 sync --pin`) can be checked
+// against it.
+type pinnedStatus struct {
+	URL          string `json:"url"`
+	SafetyNumber string `json:"safetyNumber"`
+}
+
+// pinnedServers lists the vault's pinned servers; it needs an unlocked vault.
+func pinnedServers(ctx context.Context) ([]pinnedStatus, error) {
+	s, err := Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	out := make([]pinnedStatus, 0, len(s.Body.PinnedServers))
+	for url, pin := range s.Body.PinnedServers {
+		fp, err := ServerFingerprint(url, pin.ServerPub)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pinnedStatus{URL: url, SafetyNumber: fp})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].URL < out[j].URL })
+	return out, nil
 }
 
 // RunStatus prints agent state.
@@ -581,8 +609,14 @@ func RunStatus(ctx context.Context, asJSON bool) error {
 	if err != nil {
 		return err
 	}
+	var servers []pinnedStatus
+	if st.Unlocked {
+		if servers, err = pinnedServers(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not read pinned servers: %v\n", err)
+		}
+	}
 	if asJSON {
-		return json.NewEncoder(os.Stdout).Encode(statusJSON{Agent: "running", Unlocked: st.Unlocked, SSHGrantCount: st.SSHGrantCount})
+		return json.NewEncoder(os.Stdout).Encode(statusJSON{Agent: "running", Unlocked: st.Unlocked, SSHGrantCount: st.SSHGrantCount, Servers: servers})
 	}
 	if st.SSHGrantCount > 0 {
 		fmt.Printf("SSH grants: %d active (fd0 lock --all stops them)\n", st.SSHGrantCount)
@@ -593,6 +627,9 @@ func RunStatus(ctx context.Context, asJSON bool) error {
 	}
 	fmt.Printf("agent:  running, unlocked since %d\n", st.SinceUnix)
 	fmt.Printf("super_pub: %s\n", b64full(st.UserSuperPub))
+	for _, srv := range servers {
+		fmt.Printf("server: %s\nsafety number:\n%s\n", srv.URL, indent(srv.SafetyNumber, "  "))
+	}
 	return nil
 }
 

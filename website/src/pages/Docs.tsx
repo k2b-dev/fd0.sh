@@ -1228,13 +1228,16 @@ $ fd0 unlock --key-file /etc/ci/fd0.key`}</Box>
     </P>
 
     <H2>Pin the server</H2>
-    <Box>{`$ fd0 sync                               # refuses and prints the safety number
-$ fd0 sync --pin "12345 67890 ..."       # pins only if the number matches`}</Box>
+    <Box>{`# on your device: the server and safety number it pinned
+$ fd0 status
+
+# on the machine
+$ fd0 sync --pin "12345 67890 ..."`}</Box>
     <P>
-      Compare the printed safety number with one you trust, such as the number
-      your own device showed when it first connected to the same server.{" "}
-      <Code>--pin</Code> refuses a server whose number differs, on first
-      contact and later. Background sync never pins a server by itself.
+      Take the safety number from <Code>fd0 status</Code> on a device that
+      already uses the same server. <Code>--pin</Code> pins the server only if
+      the numbers match, and refuses a server whose number differs later.
+      Background sync never pins a server by itself.
     </P>
 
     <H2>Give it access</H2>
