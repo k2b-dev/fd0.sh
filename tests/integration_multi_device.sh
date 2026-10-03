@@ -130,12 +130,18 @@ printf "bob-rec\nbob-rec\n"     | BL recovery export "$RECOVERY".bob   >>/tmp/fd
 [ -f "$RECOVERY".alice ] && ok "Alice's recovery file written" || no "Alice recovery export failed (see /tmp/fd0-multi-step2.log)"
 [ -f "$RECOVERY".bob   ] && ok "Bob's recovery file written"   || no "Bob recovery export failed"
 
-printf "alice-rec\nalice-desktop-pass\nalice-desktop-pass\n" | env FD0_HOME="$HOME/.fd0-alice-desktop" FD0_SSH_SOCK="$HOME/.fd0-alice-desktop/ssh.sock" "$FD0" recovery import "$RECOVERY".alice >>/tmp/fd0-multi-step2.log 2>&1 \
+printf "alice-rec\n" | env FD0_HOME="$HOME/.fd0-alice-desktop" FD0_SSH_SOCK="$HOME/.fd0-alice-desktop/ssh.sock" "$FD0" recovery import "$RECOVERY".alice >>/tmp/fd0-multi-step2.log 2>&1 \
     || no "Alice restore failed: $(tail -3 /tmp/fd0-multi-step2.log)"
-printf "bob-rec\nbob-desktop-pass\nbob-desktop-pass\n"       | env FD0_HOME="$HOME/.fd0-bob-desktop" FD0_SSH_SOCK="$HOME/.fd0-bob-desktop/ssh.sock" "$FD0" recovery import "$RECOVERY".bob   >>/tmp/fd0-multi-step2.log 2>&1 \
+printf "bob-rec\n"       | env FD0_HOME="$HOME/.fd0-bob-desktop" FD0_SSH_SOCK="$HOME/.fd0-bob-desktop/ssh.sock" "$FD0" recovery import "$RECOVERY".bob   >>/tmp/fd0-multi-step2.log 2>&1 \
     || no "Bob restore failed: $(tail -3 /tmp/fd0-multi-step2.log)"
-unlock "$HOME/.fd0-alice-desktop" "alice-desktop-pass"
-unlock "$HOME/.fd0-bob-desktop"   "bob-desktop-pass"
+# Version 2 recovery files carry the identity's unlock methods, so the
+# restored device unlocks with the same passphrase as the original.
+unlock "$HOME/.fd0-alice-desktop" "alice-laptop-pass"
+unlock "$HOME/.fd0-bob-desktop"   "bob-laptop-pass"
+# Background sync never pins a server on first contact; one explicit sync
+# per new device does (FD0_AUTO_PIN=1 confirms the pin unattended).
+AD sync >/dev/null 2>&1 || no "Alice/desktop first sync failed"
+BD sync >/dev/null 2>&1 || no "Bob/desktop first sync failed"
 sleep 0.3
 # super_pub sanity: Alice's two devices share identity
 LAPTOP_PUB=$(AL status | awk '/super_pub/{print $2}')
@@ -367,7 +373,7 @@ COUNT_BEFORE=$(AL auth ls | grep -c "^" || true)
 # card / build tag absent.
 OUT=$(printf "n\n" | AL auth add --yubikey 2>&1 || true)
 case "$OUT" in
-    *"build fd0 with -tags=yubikey"* | *"yubikey:"* | *"no smartcard"*)
+    *"build fd0 with -tags=yubikey"* | *"yubikey:"* | *"no smartcard"* | *"without YubiKey/PIV support"*)
         ok "yubikey enroll surfaced a clear error" ;;
     *) no "yubikey enroll output unexpected: $OUT" ;;
 esac
@@ -389,7 +395,7 @@ sleep 0.4
 # limiter runs first. So we expect:
 #   1st: 400 (bad body) but bucket spent
 #   2nd: 429 (limit hit)
-curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${RL_PORT}/users" \
+curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${RL_PORT}/v1/users" \
     -H "Content-Type: application/cbor" --data-binary "x" > /tmp/fd0-rl-first.code
 FIRST=$(cat /tmp/fd0-rl-first.code)
 # Either 400 (bad body) or 201 — both consume a token.
@@ -397,10 +403,10 @@ case "$FIRST" in
     400|201) ok "first /users call returned $FIRST (bucket consumed)" ;;
     *) no "first /users call returned unexpected $FIRST" ;;
 esac
-SECOND=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${RL_PORT}/users" \
+SECOND=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${RL_PORT}/v1/users" \
     -H "Content-Type: application/cbor" --data-binary "x")
 expect_eq "$SECOND" "429" "second /users call rate-limited (429)"
-RETRY=$(curl -s -i -X POST "http://127.0.0.1:${RL_PORT}/users" \
+RETRY=$(curl -s -i -X POST "http://127.0.0.1:${RL_PORT}/v1/users" \
     -H "Content-Type: application/cbor" --data-binary "x" | tr -d '\r' | awk '/^Retry-After:/{print $2}')
 if [ -n "$RETRY" ]; then ok "Retry-After present (= ${RETRY}s)"
 else no "Retry-After header missing on 429"
