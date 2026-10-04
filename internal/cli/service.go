@@ -261,6 +261,9 @@ func RunServiceRename(ctx context.Context, scopeID, oldName, newName string, for
 		return err
 	}
 	defer s.Close()
+	if err := refuseWithRecipes(s, scopeID, oldName, "rename"); err != nil {
+		return err
+	}
 	return s.RenameItem(ctx, KindService, scopeID, oldName, newName, force, nil)
 }
 
@@ -270,6 +273,9 @@ func RunServiceMove(ctx context.Context, name, fromScope, toScope string, force 
 		return err
 	}
 	defer s.Close()
+	if err := refuseWithRecipes(s, fromScope, name, "move"); err != nil {
+		return err
+	}
 	return s.MoveItem(ctx, KindService, name, fromScope, toScope, force)
 }
 
@@ -279,6 +285,9 @@ func RunServiceRemove(ctx context.Context, scopeID, name string, yes bool) error
 		return err
 	}
 	defer s.Close()
+	if names := servicesRecipeNames(s, rec.ScopeID, name); len(names) > 0 {
+		stderrln("⚠ recipes %s use this service and stop working without it", strings.Join(names, ", "))
+	}
 	if err := confirmDanger(yes, fmt.Sprintf("Remove service %q from %s?", name, scopeName(s, rec.ScopeID))); err != nil {
 		return err
 	}
@@ -538,4 +547,13 @@ func RunServiceK8sSecret(ctx context.Context, scopeID, name, namespace, secretNa
 	}
 	_, err = os.Stdout.Write(out)
 	return err
+}
+
+// refuseWithRecipes stops a rename or move that would orphan recipes: a
+// recipe names its service and its approvals pin the scope.
+func refuseWithRecipes(s *Session, scopeID, name, verb string) error {
+	if names := servicesRecipeNames(s, scopeID, name); len(names) > 0 {
+		return fmt.Errorf("service %q has recipes (%s); remove them before you %s it, then add and approve them again", name, strings.Join(names, ", "), verb)
+	}
+	return nil
 }

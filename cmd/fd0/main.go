@@ -51,6 +51,7 @@ type rootCLI struct {
 	Kube     kubeCmd     `cmd:"" help:"Manage Kubernetes kubeconfig clusters (Talos, EKS, GKE, AKS, …)."`
 	Service  serviceCmd  `cmd:"" help:"Manage credentials that programs consume (env files, Kubernetes Secrets)."`
 	Run      runCmd      `cmd:"" help:"Run a command with a service's env-named fields in its environment."`
+	Recipe   recipeCmd   `cmd:"" help:"Saved deploy commands for services, approved per device (fd0 service deploy runs them)."`
 	Version  versionCmd  `cmd:"" help:"Print version and exit."`
 	Update   updateCmd   `cmd:"" help:"Update fd0 and fd0-agent from the latest client release."`
 
@@ -695,6 +696,94 @@ type serviceCmd struct {
 	Rm        serviceRmCmd        `cmd:"" help:"Remove a service (tombstone)."`
 	Move      serviceMoveCmd      `cmd:"" help:"Move a service between scopes."`
 	History   itemHistoryCmd      `cmd:"" help:"Show or restore earlier versions of a service."`
+	Deploy    serviceDeployCmd    `cmd:"" help:"Sync, then run the service's approved recipes in name order (all, one recipe, or one target)."`
+}
+type serviceDeployCmd struct {
+	Name    string `arg:"" help:"SERVICE (all its recipes) or SERVICE/NAME (one recipe)."`
+	Scope   string `name:"scope" help:"Scope label or id."`
+	Target  string `name:"target" help:"Run only this target of the selected recipe."`
+	Verbose bool   `name:"verbose" short:"v" help:"Show command output. It can contain the values the command received."`
+}
+
+type recipeCmd struct {
+	Add       recipeAddCmd       `cmd:"" help:"Save a deploy command for a service: fields arrive on stdin or in the environment, never as arguments."`
+	Edit      recipeEditCmd      `cmd:"" help:"Replace a recipe's definition; every device must approve it again."`
+	List      recipeListCmd      `cmd:"" aliases:"ls" help:"List recipes and whether this device approved them."`
+	Show      recipeShowCmd      `cmd:"" help:"Show a recipe, its approval on this device and the last results per target and device."`
+	Rm        recipeRmCmd        `cmd:"" help:"Remove a recipe."`
+	History   itemHistoryCmd     `cmd:"" help:"Show or restore earlier versions of a recipe."`
+	Approve   recipeApproveCmd   `cmd:"" help:"Review a recipe and allow this device to run it (fresh authentication)."`
+	Approvals recipeApprovalsCmd `cmd:"" help:"List the recipes this device may run."`
+	Revoke    recipeRevokeCmd    `cmd:"" help:"Withdraw this device's approval for a recipe."`
+}
+type recipeDefinitionFlags struct {
+	Scope       string   `name:"scope" help:"Scope label or id of the service."`
+	Fields      []string `name:"field" required:"" help:"Service field to pass, as FIELD or FIELD=NAME (env variable or Secret key). Repeatable."`
+	Stdin       string   `name:"stdin" help:"Pass the fields on stdin as systemd-env, docker-env, sh, file, or k8s-secret:NAMESPACE/SECRET."`
+	Env         bool     `name:"env" help:"Pass the fields as environment variables instead."`
+	For         []string `name:"for" help:"Targets: run the command once per target with $FD0_TARGET set (comma-separated or repeatable)."`
+	Dir         string   `name:"dir" help:"Working directory (absolute or ~/…); default: home."`
+	Description string   `name:"description" help:"Short description; changing it needs no new approval."`
+	Command     []string `arg:"" passthrough:"" help:"Program (absolute path or ~/…) and arguments, after --."`
+}
+type recipeAddCmd struct {
+	Name string `arg:"" help:"SERVICE/NAME."`
+	recipeDefinitionFlags
+}
+type recipeEditCmd struct {
+	Name string `arg:"" help:"SERVICE/NAME."`
+	recipeDefinitionFlags
+}
+type recipeListCmd struct {
+	Service string `arg:"" optional:"" help:"Only recipes of this service."`
+	Scope   string `name:"scope" help:"Scope label or id."`
+	JSON    bool   `name:"json" help:"Machine-readable output."`
+}
+type recipeShowCmd struct {
+	Name  string `arg:"" help:"SERVICE/NAME."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	JSON  bool   `name:"json" help:"Machine-readable output."`
+}
+type recipeRmCmd struct {
+	Name  string `arg:"" help:"SERVICE/NAME."`
+	Scope string `name:"scope" help:"Scope label or id."`
+	Yes   bool   `name:"yes" short:"y" help:"Do not prompt."`
+}
+type recipeApproveCmd struct {
+	Name   string `arg:"" help:"SERVICE/NAME."`
+	Scope  string `name:"scope" help:"Scope label or id."`
+	Method string `name:"method" help:"Auth method type or method_id to use."`
+}
+type recipeApprovalsCmd struct {
+	JSON bool `name:"json" help:"Machine-readable output."`
+}
+type recipeRevokeCmd struct {
+	Name  string `arg:"" help:"SERVICE/NAME."`
+	Scope string `name:"scope" help:"Scope label or id."`
+}
+
+func (f recipeDefinitionFlags) opts(name string) (cli.RecipeOpts, error) {
+	input := ""
+	switch {
+	case f.Env && f.Stdin != "":
+		return cli.RecipeOpts{}, errors.New("recipe: choose --stdin FORMAT or --env, not both")
+	case f.Env:
+		input = "env"
+	case f.Stdin != "":
+		input = "stdin:" + f.Stdin
+	default:
+		return cli.RecipeOpts{}, errors.New("recipe: choose how values arrive: --stdin FORMAT or --env")
+	}
+	var targets []string
+	for _, t := range f.For {
+		for _, part := range strings.Split(t, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				targets = append(targets, part)
+			}
+		}
+	}
+	return cli.RecipeOpts{Name: name, Scope: f.Scope, Command: f.Command, Dir: f.Dir, Fields: f.Fields,
+		Input: input, Targets: targets, Description: f.Description}, nil
 }
 type runCmd struct {
 	Service string   `name:"service" required:"" help:"Service whose fields are added to the environment."`
@@ -1181,6 +1270,12 @@ func commandNeedsUnlockedVault(command string) bool {
 		"service add <name>", "service set <name>", "service set <name> <field>", "service set <name> <field> <value>",
 		"service get <name> <field>", "service unset <name> <field>", "service env <name>", "service k8s-secret <name>",
 		"run <command>",
+		"service deploy <name>",
+		"recipe add <name> <command>", "recipe edit <name> <command>",
+		"recipe list", "recipe ls", "recipe list <service>", "recipe ls <service>",
+		"recipe show <name>", "recipe rm <name>",
+		"recipe history <name>", "recipe history show <name>", "recipe history restore <name> <seq>",
+		"recipe approve <name>", "recipe approvals", "recipe revoke <name>",
 		"service edit <name>", "service list", "service ls", "service show <name>",
 		"service rename <name> <new-name>", "service rm <name>", "service move <name>",
 		"talos history <name>", "talos history show <name>",
@@ -1529,6 +1624,35 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		return cli.RunServiceFieldRemove(ctx, c.Service.Unset.Scope, c.Service.Unset.Name, c.Service.Unset.Field, c.Service.Unset.Yes)
 	case "run <command>":
 		return cli.RunServiceExec(ctx, c.Run.Scope, c.Run.Service, c.Run.Fields, c.Run.Command)
+	case "service deploy <name>":
+		v := c.Service.Deploy
+		return cli.RunServiceDeploy(ctx, cli.DeployOpts{Scope: v.Scope, Name: v.Name, Target: v.Target, Verbose: v.Verbose})
+	case "recipe add <name> <command>", "recipe edit <name> <command>":
+		f, name, edit := c.Recipe.Add.recipeDefinitionFlags, c.Recipe.Add.Name, false
+		if strings.HasPrefix(kctx.Command(), "recipe edit") {
+			f, name, edit = c.Recipe.Edit.recipeDefinitionFlags, c.Recipe.Edit.Name, true
+		}
+		o, err := f.opts(name)
+		if err != nil {
+			return err
+		}
+		return cli.RunRecipeAdd(ctx, o, edit)
+	case "recipe list", "recipe ls", "recipe list <service>", "recipe ls <service>":
+		return cli.RunRecipeList(ctx, c.Recipe.List.Scope, c.Recipe.List.Service, c.Recipe.List.JSON)
+	case "recipe show <name>":
+		return cli.RunRecipeShow(ctx, c.Recipe.Show.Scope, c.Recipe.Show.Name, c.Recipe.Show.JSON)
+	case "recipe rm <name>":
+		return cli.RunRecipeRemove(ctx, c.Recipe.Rm.Scope, c.Recipe.Rm.Name, c.Recipe.Rm.Yes)
+	case "recipe history <name>", "recipe history show <name>":
+		return cli.RunItemHistory(ctx, cli.KindRecipe, c.Recipe.History.Show.Scope, c.Recipe.History.Show.Name, c.Recipe.History.Show.JSON)
+	case "recipe history restore <name> <seq>":
+		return cli.RunItemRestore(ctx, cli.KindRecipe, c.Recipe.History.Restore.Scope, c.Recipe.History.Restore.Name, c.Recipe.History.Restore.Seq)
+	case "recipe approve <name>":
+		return cli.RunRecipeApprove(ctx, c.Recipe.Approve.Scope, c.Recipe.Approve.Name, c.Recipe.Approve.Method)
+	case "recipe approvals":
+		return cli.RunRecipeApprovals(ctx, c.Recipe.Approvals.JSON)
+	case "recipe revoke <name>":
+		return cli.RunRecipeRevoke(ctx, c.Recipe.Revoke.Scope, c.Recipe.Revoke.Name)
 	case "service env <name>":
 		return cli.RunServiceEnv(ctx, c.Service.Env.Scope, c.Service.Env.Name, c.Service.Env.Fields, c.Service.Env.Format)
 	case "service k8s-secret <name>":

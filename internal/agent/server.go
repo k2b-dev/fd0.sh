@@ -321,7 +321,7 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	requestCtx := ctx
 	cancel := func() {}
 	responseTimeout := agentRPCTimeout
-	if req.Op == OpUnlock || req.Op == OpSSHGrant {
+	if req.Op == OpUnlock || req.Op == OpSSHGrant || req.Op == OpRecipeApproval {
 		requestCtx, cancel = context.WithTimeout(ctx, agentUnlockTimeout)
 		responseTimeout = agentUnlockTimeout + agentUnlockServerGrace
 	}
@@ -344,6 +344,8 @@ func (s *Server) dispatch(ctx context.Context, req *Request) (resp *Response) {
 	switch req.Op {
 	case OpSSHGrant:
 		return s.handleSSHGrant(ctx, req.SSHGrant)
+	case OpRecipeApproval:
+		return s.handleRecipeApproval(ctx, req.RecipeApproval)
 	case OpLockAll:
 		s.mu.Lock()
 		s.lockHeld()
@@ -420,6 +422,7 @@ func (s *Server) handleStatus() *Response {
 		Unlocked:           s.superPriv != nil,
 		SSHGrantCount:      len(s.sshGrants),
 		SSHGrantsSupported: true,
+		RecipesSupported:   true,
 		Protocol:           ProtocolVersion,
 		StartedBy:          s.cfg.StartedBy,
 		Version:            s.cfg.Version,
@@ -717,6 +720,7 @@ func (s *Server) handleReSeal(r *ReSealReq) *Response {
 		return errResp("invalid cached vault")
 	}
 	body.SSHGrants = current.SSHGrants
+	body.RecipeApprovals = current.RecipeApprovals
 	redacted := *body
 	redacted.SuperPriv = make([]byte, ed25519.PrivateKeySize)
 	rb, err := proto.Marshal(redacted)

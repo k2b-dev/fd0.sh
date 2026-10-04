@@ -404,7 +404,7 @@ func RunItemRestore(ctx context.Context, kind ItemKind, scopeID, name string, se
 // module's records too — `fd0 secret rm host:prod` would delete an SSH host
 // while claiming to remove a secret.
 func kindOwning(name string) (ItemKind, bool) {
-	for _, kind := range append(itemKinds, KindTalosSecrets) {
+	for _, kind := range append(itemKinds, KindTalosSecrets, KindRecipe, KindDeployResult) {
 		if kind.Prefix != "" && strings.HasPrefix(name, kind.Prefix) {
 			return kind, true
 		}

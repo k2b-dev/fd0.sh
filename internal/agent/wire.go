@@ -73,12 +73,14 @@ const (
 	OpRemoveWrap       uint8 = 11
 	OpSSHGrant         uint8 = 12
 	OpLockAll          uint8 = 13
+	OpRecipeApproval   uint8 = 14
 )
 
 // Request is the client→agent envelope. Exactly one of the typed fields is
 // populated, identified by Op.
 type Request struct {
 	SSHGrant         *SSHGrantReq         `cbor:"ssh_grant,omitempty"`
+	RecipeApproval   *RecipeApprovalReq   `cbor:"recipe_approval,omitempty"`
 	Op               uint8                `cbor:"op"`
 	Unlock           *UnlockReq           `cbor:"unlock,omitempty"`
 	Sign             *SignReq             `cbor:"sign,omitempty"`
@@ -140,6 +142,7 @@ type RecoveryExportResp struct {
 // Response is the agent→client envelope.
 type Response struct {
 	SSHGrant         *SSHGrantResp         `cbor:"ssh_grant,omitempty"`
+	RecipeApproval   *RecipeApprovalResp   `cbor:"recipe_approval,omitempty"`
 	Err              string                `cbor:"err,omitempty"`
 	Status           *StatusResp           `cbor:"status,omitempty"`
 	Unlock           *UnlockResp           `cbor:"unlock,omitempty"`
@@ -191,6 +194,7 @@ type UnlockResp struct {
 type StatusResp struct {
 	SSHGrantCount      int    `cbor:"ssh_grant_count,omitempty"`
 	SSHGrantsSupported bool   `cbor:"ssh_grants_supported,omitempty"`
+	RecipesSupported   bool   `cbor:"recipes_supported,omitempty"`
 	UnlockSession      string `cbor:"unlock_session,omitempty"` // Changes on every unlock, including within one second.
 	Unlocked           bool   `cbor:"unlocked"`
 	SinceUnix          int64  `cbor:"since,omitempty"`

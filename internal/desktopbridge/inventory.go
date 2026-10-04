@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/valentinkolb/fd0.sh/internal/kubeconfig"
 	"github.com/valentinkolb/fd0.sh/internal/passitem"
 	"github.com/valentinkolb/fd0.sh/internal/proto"
+	"github.com/valentinkolb/fd0.sh/internal/recipe"
 	"github.com/valentinkolb/fd0.sh/internal/service"
 	"github.com/valentinkolb/fd0.sh/internal/sshhost"
 	"github.com/valentinkolb/fd0.sh/internal/sshkey"
@@ -260,6 +262,11 @@ func encodedSize(value any) int {
 }
 
 func summarizeRecord(session *cli.Session, record cli.TypedRecord) (ItemSummary, error) {
+	if record.Type == recipe.TypeRecipe || record.Type == recipe.TypeResult {
+		// Deploy recipes and their results are managed with fd0 recipe; the
+		// Desktop must not offer them as general secrets.
+		return ItemSummary{}, errors.New("recipes are not shown in Desktop")
+	}
 	raw, err := record.PayloadJSON()
 	if err != nil {
 		return ItemSummary{}, err
