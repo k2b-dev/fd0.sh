@@ -1141,7 +1141,9 @@ func main() {
 		if cli.RestoreTerminal() {
 			fmt.Fprintln(os.Stderr)
 		}
-		cli.Interrupt(5 * time.Second)
+		// Long enough for a deploy to record the result of the target it
+		// was running; commands without tracked cleanup exit at once.
+		cli.Interrupt(cli.InterruptCleanupWindow)
 	}, os.Interrupt, syscall.SIGTERM)
 	defer memguard.Purge()
 

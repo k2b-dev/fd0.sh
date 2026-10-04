@@ -163,14 +163,19 @@ func loadRecipesChecked(s *Session, scopeID, serviceName string) ([]recipeEntry,
 	if err != nil {
 		return nil, nil, err
 	}
-	recs, err := s.ListTypedSecrets(scopeID, recipe.TypeRecipe)
+	// Every record in the recipe namespace counts, whatever its type, so a
+	// record no step can use is reported instead of silently skipped.
+	recs, err := s.ListTypedSecrets(scopeID, "")
 	if err != nil {
 		return nil, nil, err
 	}
 	out := []recipeEntry{}
 	unusable := []string{}
 	for _, rec := range recs {
-		name := strings.TrimPrefix(rec.Name, recipeNamePrefix)
+		name, ok := strings.CutPrefix(rec.Name, recipeNamePrefix)
+		if !ok {
+			continue
+		}
 		if serviceName != "" && !strings.HasPrefix(name, serviceName+"/") {
 			continue
 		}
@@ -340,7 +345,7 @@ func RunRecipeShow(ctx context.Context, scopeID, name string, jsonOut bool) erro
 		if r.Status != "ok" {
 			mark = fmt.Sprintf("✗ exit %d", r.ExitCode)
 		}
-		fmt.Printf("  %-16s %s  %s  from %s\n", terminalSafe(target), mark, r.At, terminalSafe(r.Host))
+		fmt.Printf("  %-16s %s  %s  from %s\n", terminalSafe(target), mark, terminalSafe(r.At), terminalSafe(r.Host))
 	}
 	return nil
 }
@@ -768,6 +773,8 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	if run.prepared.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(run.prepared.Stdin)
 	}
+	// A descendant that keeps stdin open must not hold a finished command.
+	cmd.WaitDelay = 10 * time.Second
 	// Without verbose, stdout and stderr stay nil: the command writes straight
 	// to /dev/null, so no pipe can keep a finished command waiting.
 	if verbose {
@@ -815,14 +822,16 @@ func (r *resultRecorder) record(res recipe.Result) {
 	}
 	// A fresh, bounded context: the command context may already be cancelled
 	// by an interrupt, and the result of what ran must still be saved.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), InterruptCleanupWindow-2*time.Second)
 	defer cancel()
 	res.Device, res.Host = r.device, r.host
 	if err := r.write(ctx, res); err != nil {
 		stderrln("⚠ result for %s not recorded: %v", terminalSafe(res.Recipe), err)
 		return
 	}
-	r.wrote = true
+	if !r.skip {
+		r.wrote = true
+	}
 }
 
 func (r *resultRecorder) write(ctx context.Context, res recipe.Result) error {

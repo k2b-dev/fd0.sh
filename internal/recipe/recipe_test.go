@@ -172,11 +172,30 @@ func TestResolveNamesStoresEnvNames(t *testing.T) {
 }
 
 func TestResultConsistency(t *testing.T) {
-	res := Result{Recipe: "shop-db/apps", Target: "app-1", Device: "dev1", Status: "ok"}
+	res := Result{Recipe: "shop-db/apps", Target: "app-1", Device: "dev1", Status: "ok", At: "2026-10-04T12:00:00Z"}
 	if !res.Consistent("shop-db/apps/app-1/dev1") {
 		t.Fatal("consistent result rejected")
 	}
 	if res.Consistent("shop-db/apps/app-1/dev2") || res.Consistent("shop-db/other/app-1/dev1") {
 		t.Fatal("mismatched result accepted")
+	}
+}
+
+func TestResultConsistencyChecksStatusAndTime(t *testing.T) {
+	base := Result{Recipe: "a/b", Device: "d", Status: "ok", At: "2026-10-04T12:00:00Z"}
+	if !base.Consistent("a/b/-/d") {
+		t.Fatal("valid result rejected")
+	}
+	for name, mutate := range map[string]func(*Result){
+		"ok with exit code": func(r *Result) { r.ExitCode = 7 },
+		"failed with zero":  func(r *Result) { r.Status = "failed" },
+		"control sequence":  func(r *Result) { r.At = "\x1b[2J2026-10-04T12:00:00Z" },
+		"unknown status":    func(r *Result) { r.Status = "maybe" },
+	} {
+		r := base
+		mutate(&r)
+		if r.Consistent("a/b/-/d") {
+			t.Fatalf("%s accepted", name)
+		}
 	}
 }

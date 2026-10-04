@@ -1189,6 +1189,44 @@ $ fd0 service show pg-1`}</Box>
       variable.
     </P>
 
+    <H2 id="recipes">Deploy with recipes</H2>
+    <P>
+      A recipe saves the command that brings a service's values to where they
+      are used, so every device can repeat it with one command. You write the
+      command with the tools you already use; fd0 passes the selected fields
+      on stdin or in the environment and runs it. Before and after steps, such
+      as a restart, belong in the command.
+    </P>
+    <Box>{`$ fd0 recipe add pg-1/apps --field db-password --stdin systemd-env \\
+    --for app-1,app-2 -- /bin/sh -c \\
+    'ssh "$FD0_TARGET" "sudo install -m 600 /dev/stdin /etc/app.env && sudo systemctl restart app"'
+$ fd0 recipe approve pg-1/apps      # once per device
+$ fd0 service deploy pg-1`}</Box>
+    <Cmd
+      signature="fd0 recipe add <service>/<name> --field <f[=NAME]> (--stdin <format> | --env) [--for <targets>] -- <program> …"
+      body="Save a recipe. Formats: systemd-env, docker-env, sh, file (one field) and k8s-secret:NAMESPACE/SECRET. With --for, the command runs once per target with $FD0_TARGET set. The program must be an absolute path or start with ~/."
+    />
+    <Cmd
+      signature="fd0 recipe approve <service>/<name>"
+      body="Show the recipe and allow this device to run it, after authenticating again. Any change to the recipe needs a new approval on every device; changing a value does not."
+    />
+    <Cmd
+      signature="fd0 service deploy <service>[/<name>] [--target <t>] [-v]"
+      body="Sync, then run the service's approved recipes in name order and stop at the first failure. Output stays hidden unless -v, because it can contain values."
+    />
+    <Cmd
+      signature="fd0 recipe show <service>/<name>"
+      body="Show the definition, whether this device approved it, and the last result per target and device. Results sync to every device; readers can deploy, but their results stay on their screen."
+    />
+    <Note>
+      A recipe is code that anyone who can write to the scope can change.
+      Approving one lets this device run it as your user, with your files and
+      SSH agent; fd0 does not sandbox it or check the scripts and tool
+      configuration it calls. Review what you approve. Update every device in
+      the scope to fd0 0.21.0 or later before you add recipes; older versions
+      show them as plain secrets.
+    </Note>
+
     <H2>Change and roll back</H2>
     <Box>{`$ openssl rand -base64 32 | fd0 service set pg-1 db-password -
 $ fd0 service show pg-1          # revision and change date per field

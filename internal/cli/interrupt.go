@@ -31,6 +31,10 @@ func trackCleanup() func() {
 	}
 }
 
+// InterruptCleanupWindow is how long an interrupt waits for tracked cleanup,
+// such as a deploy saving the result of the target it was running.
+const InterruptCleanupWindow = 20 * time.Second
+
 // Interrupt cancels running commands and waits up to timeout for tracked
 // cleanup to finish.
 func Interrupt(timeout time.Duration) {

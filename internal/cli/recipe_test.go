@@ -258,7 +258,7 @@ func TestRecipeReviewGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateTypedSecret(ctx, scope, recipeNamePrefix+"app/broken", "fd0.recipe", map[string]any{"version": 99}); err != nil {
+	if err := s.CreateTypedSecret(ctx, scope, recipeNamePrefix+"app/broken", "kv.other", map[string]any{"version": 1}); err != nil {
 		t.Fatal(err)
 	}
 	// A forged result naming another device is ignored.

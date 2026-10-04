@@ -390,7 +390,19 @@ func DecodeResult(raw []byte) (*Result, error) {
 // Consistent reports whether a result record's payload matches its name, so a
 // record cannot claim to be another recipe's, target's or device's result.
 func (res *Result) Consistent(recordName string) bool {
-	return recordName == ResultName(res.Recipe, res.Target, res.Device) && (res.Status == "ok" || res.Status == "failed")
+	if recordName != ResultName(res.Recipe, res.Target, res.Device) {
+		return false
+	}
+	if _, err := time.Parse(time.RFC3339, res.At); err != nil {
+		return false
+	}
+	switch res.Status {
+	case "ok":
+		return res.ExitCode == 0
+	case "failed":
+		return res.ExitCode != 0
+	}
+	return false
 }
 
 // SortResults orders results by target, then newest first.

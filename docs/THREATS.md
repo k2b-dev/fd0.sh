@@ -854,3 +854,34 @@ ignore roles. An older server started on a database that already holds roles
 would forget them; from store generation 2 on, servers refuse databases of a
 newer generation, and downgrading after roles are used is unsupported.
 
+
+## Deploy recipes
+
+A deploy recipe (docs/SERVICES_PLAN.md, phase 3) is a command stored in a
+scope that a device runs with selected service values on stdin or in its
+environment. Every writer of the scope can create or change recipes, so a
+recipe is code from another member. The boundary is the per-device approval:
+the agent records it only after fresh authentication in a terminal, binds it
+to the device ID, and pins a digest of the scope, the recipe name and every
+part of the definition that affects what runs or what it receives (program
+and arguments, working directory, field selection with variable names or
+Secret keys, input format, targets) plus the device's home directory. Any
+change makes `fd0 service deploy` refuse until the device approves again;
+value rotations do not. Recipes never run on sync, unlock or rotation,
+approval is not available through organization grants, and approval grants
+no locked access.
+
+An approved recipe runs as the user with that user's files, SSH agent and
+unlocked vault. Approval does not sandbox it and does not cover scripts,
+tools or configuration it calls (`kubectl` contexts, SSH aliases): those
+remain the operator's trust. fd0 never puts values into arguments, sets its
+own `FD0_*` variables last and refuses them as value names, discards command
+output unless `--verbose`, and re-checks the approval before every launch so a
+revocation or lock stops what has not started. Deploy results are ordinary
+scope records written by the deploying device and contain no values. They
+are reports from a scope writer, not authenticated device attestations, and a
+successful command does not prove an application uses a value. Two devices
+deploying at the same time can race; one deploying device per target, or a
+destination that rejects stale writes, avoids that. An older agent that does
+not know recipe approvals drops them when it rewrites the vault; deploys then
+refuse until the recipe is approved again.
