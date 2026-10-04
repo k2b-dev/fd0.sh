@@ -1,6 +1,6 @@
 # Services plan
 
-Status: phase 1 implemented 2026-10-01, phase 2 implemented 2026-10-02; phase 3 planned (draft for review, 2026-10-03), not implemented.
+Status: phase 1 implemented 2026-10-01, phase 2 implemented 2026-10-02, phase 3 (deploy recipes) implemented 2026-10-04.
 
 ## Outcome and scope
 
@@ -58,69 +58,27 @@ Compatibility: clients before this release do not know the `service:` prefix and
 
 `fd0 run --service NAME [--field F ...] -- COMMAND ...` replaces fd0 with the command (exec), adding the selected env-named fields to its environment, so the exit status and signals are the command's own. The usual caveat applies: the environment is readable by the same user and inherited by child processes.
 
-## Phase 3: approved consumers, deploy and check
+## Phase 3: deploy recipes (implemented 2026-10-04)
 
-Only after phase 1 has proven itself. Deploying means the admin's SSH and cluster credentials write values onto systems, so targets must be trusted, not just listed.
+Phase 3 is convenience on top of phase 2: everything could be done with `fd0 run` and pipes, but the commands then live in READMEs and shell history. A recipe saves such a command next to its service, so every device and member can repeat it, and each device decides once whether it runs it. fd0 stays a general utility: where values go, with which rights and tools, and what happens before or after, is the recipe author's command, not fd0 logic. An earlier draft with built-in SFTP and Kubernetes consumers was dropped after review because it grew special happy paths.
 
-- **Consumers** reference fd0 host and kube records by record ID. Modes:
-  - `managed`: deploy and check.
-  - `bootstrap`: create when missing, never overwrite, not checked (values renewed elsewhere, e.g. in-cluster certificate renewal).
-  - `manual`: documentation only (settings set through an application API or another tool). `show` lists them in the rotation checklist.
-  - Embedded uses (a credential inside a larger, validated config such as `named.conf` or `patroni.yml`) stay with their own tooling, which reads the value via `get --raw` or a rendered template on stdout.
-- **Approval:** a consumer is used only after a per-device approval with fresh authentication, like SSH grants. The approval pins the target record IDs, the SSH host-key fingerprints or the kube server URL and CA hash, the destination path, owner and mode. `deploy` refuses new or changed targets and shows the difference. This stops a scope member or an agent from redirecting a deploy.
-- **Hosts:** see the implementation plan below (SFTP, atomic rename, no sudo in the first cut).
-- **Kubernetes:** see the implementation plan below (verified TLS, ID-based ownership, conditional writes).
-- **Order and partial failure:** consumers deploy in their listed order and stop at the first failure; `show` lists which consumers have the current field revision. A device that is not synced to the latest revision refuses to deploy, so an old value cannot overwrite a newer rotation.
-- **Check:** reads the delivered bytes back into fd0's memory over the same SSH channel or the Kubernetes API and compares them in constant time. Results are `ok`, `drift` or `missing`; no hashes or values are printed. This means values travel back to the admin device, which already holds them.
+**Model.**
 
-### Phase 3 implementation plan (draft 2026-10-03, revised after design review)
+- A recipe is its own record `recipe:SERVICE/NAME` in the service's scope, separate from the service so editing a recipe never competes with rotating a value. Payload: schema version, service name, command (argv; program is an absolute path or `~/…`), optional working directory, explicit field selection `FIELD[=NAME]`, input mode, optional target list, description. Unknown fields and newer versions are refused, never partly run.
+- Input is exactly one of: `env` (environment variables, like `fd0 run`) or stdin in an existing format (`systemd-env`, `docker-env`, `sh`, `file` for one field, `k8s-secret:NAMESPACE/SECRET`). fd0 never puts values into argv. A recipe with targets runs once per target with `$FD0_TARGET`; `$FD0_SERVICE` and `$FD0_RECIPE` are always set.
+- Before-steps, after-steps and checks are part of the command (for example an inline `/bin/sh -c '…'`), so they are covered by the approval instead of being a pipeline engine in fd0.
 
-**Smallest useful cut.** `managed` consumers of two kinds, `host-file` and `k8s-secret`, with `approve`, `deploy` and `check`. Not in the first cut: `bootstrap`, `manual`, reload commands, sudo, tunnel overrides, templates for embedded configs, machine-side pulls (those use `fd0 run` or machine identities).
+**Approval.** `fd0 recipe approve` shows the definition and needs fresh authentication in a terminal. The agent stores the approval in the device's vault (`recipe_approvals`, bound to the device ID, preserved across every vault write like SSH grants). It pins a digest of scope, name, version, service, command, working directory, fields, input and targets; the description is not pinned. Any change requires a new approval; value rotations do not. Approving means: this device may run exactly this command as the current OS user with the selected values. It does not sandbox the command, does not cover local scripts or tool configuration the command uses, and grants no locked access. Recipes never run on sync, unlock or rotation, and organization grants cannot approve or run them.
 
-**Compatibility first.** Clients up to 0.20 drop unknown service fields when they save, so they would silently erase consumers. Step 0 ships before any consumer exists: a service payload version, preservation of unknown fields on every save and restore, and refusal to save a payload from a newer version. Consumers are only accepted in scopes after the documentation tells writers to update.
+**Deploy.** `fd0 service deploy SERVICE[/NAME] [--target T] [-v]` syncs first and stops if that fails, freezes the service values, releases the vault lock, then runs the selected approved recipes in name order and each target in list order, without a terminal, and stops at the first failure. Command output is discarded unless `--verbose`, because it can contain values. fd0 reports "command succeeded", not that a value is active.
 
-**Model.** Consumers are part of the service payload, so every scope member sees where a value is used:
+**Results.** Each device writes one record per recipe target, `deploy:SERVICE/NAME/TARGET/DEVICE`, with status, exit code, time, host name, the recipe digest and the delivered service event, then syncs. Only that device writes its records, so results from several devices never conflict. Readers can approve and deploy but cannot publish results. `fd0 recipe show` lists the latest result per target and device. Results never contain values.
 
-```
-consumer = {
-  id      : "c_…",                        ; stable, generated
-  kind    : "host-file" / "k8s-secret",
-  mode    : "managed",
-  mapping : [FIELD=OUTPUT_KEY, …],         ; explicit, never a default
-  ; host-file
-  host    : host record ID, path, mode (e.g. "0600"),
-            format : "systemd-env" / "docker-env" / "sh" / "file",   ; file = exactly one file field
-  ; k8s-secret
-  kube    : kube record ID (its context), namespace, secret name,
-}
-```
-
-Host records gain an optional `deploy_prefixes` list. A destination must lie under one of them, compared by path components after resolving the existing parent directories without following symlinks. Approvals and deploy results are device-local vault fields next to `ssh_grants`, not synced.
-
-**Approval pins the resolved destination, not just IDs.** `fd0 service approve NAME` shows and pins, per consumer: scope, service record and consumer IDs; the mapping and format; for hosts the resolved connection (hostname, port, user, jump hosts, client key identity) and the server keys from the trusted `known_hosts` (never `ssh-keyscan` alone); for clusters the server URL, the CA bundle hash and the TLS settings. Value rotations need no new approval; any change to these pinned parts makes `deploy` and `check` refuse and print the difference. The connection is built from the approved specification, not re-resolved from records.
-
-**Deploy.**
-
-- Freshness: `deploy` syncs all involved scopes against the primary immediately before it prepares, and records which signed service event it delivers. This narrows but cannot remove the race between two devices deploying different revisions at the same moment; the docs say so, and the approver should be one device per service.
-- Hosts: delivery over SFTP with fd0's own SSH configuration (no remote shell), into an exclusively created temporary file in the destination directory, then an atomic rename. The SSH user must own or be allowed to write the destination directory; there is no sudo in the first cut. Owner and group are those of the SSH user; only the mode is set.
-- Kubernetes: HTTPS with certificate and hostname verification is required; a kubeconfig with `insecure-skip-tls-verify` or HTTP cannot be approved. fd0 owns the whole Secret, identified by annotations with scope, record and consumer IDs and the field manager `fd0-<consumer id>`. A missing Secret is created with create-only semantics; an existing one is updated only if its annotations match and with its observed `resourceVersion`, otherwise deploy fails. Type must be Opaque. Only the selected kube record's own config is used, never a merged user config.
-- Output: structured, bounded results per consumer. fd0 never forwards raw `kubectl`, API or SSH output, because error bodies can echo values. `--dry-run` is local: approved targets, mapping, the service event to deliver; nothing is sent.
-
-**Check** reads only the mapped outputs back over the approved connection and compares them in constant time: `ok`, `drift`, `missing`, or a distinct transport, authorization or validation error. Target-side logging is the operator's responsibility; the docs name Kubernetes audit logging of Secret bodies and SSH session logging as things to review.
-
-**Roles.** Consumers are edited by writers and admins like values. `approve`, `deploy` and `check` need only read access in fd0; the remote permissions come from the referenced SSH and kube credentials, which may themselves be shared in the scope. Approval stops a scope member from redirecting this device's deploys; it is not protection against code running as the same OS user.
-
-**Implementation steps** (each with tests and a Codex review): 0) payload version and unknown-field preservation, shipped in a release first; 1) consumer model, CLI editing, `show`; 2) approvals with fresh authentication; 3) `host-file` deploy and check against a local SSH test server; 4) `k8s-secret` deploy and check against a Kubernetes API test double; 5) docs, skill and a read-only Desktop list.
-
-**Open questions for Valentin.**
-
-1. Reload after deploy (for example `systemctl restart app`): leave out of the first cut and print the next step? Recommended: yes.
-2. Device-local deploy results (recommended) or a synced rollout state per consumer, which means every deploy writes an event?
-3. Is "the SSH user writes the destination directory, no sudo" workable for your hosts, or do you need a narrowly defined privileged step soon?
+**Limits.** Two devices deploying different revisions at the same moment can still race; the destination or one deploying device per target must serialize. fd0 cannot know whether a command used the values safely. Clients before 0.21 do not know recipes: they hide them from `service` commands but can list or delete them as plain secrets, so update every device of a scope before adding recipes there. Desktop hides recipes and results in this version.
 
 ## Verification plan
 
 - Unit tests: field types and env names, change stamps and restore, size limit, env dialect escaping, Secret manifest labels.
 - In-process vault tests for every command, including stdin-before-lock, empty stdin, refusal of positional secrets, terminal refusal, and the full kind wiring (`TestEditHintCoversEveryKind`).
 - Compatibility test: an older client's plain secret commands cannot reach a service once the guard ships.
-- Phase 3: guarded integration tests against a local SSH test server and a Kubernetes API test double, covering approval pinning, path allowlist, takeover refusal, ordered stop on failure and drift detection. No test touches production or the installed client.
+- Phase 3: `internal/recipe` unit tests (validation, digest, rendering), an in-process CLI and agent test (approval, deploy per target, rotation, re-approval, failure stop, env input, revocation, guards) and the guarded integration `tests/integration_recipes.sh` (two identities, synced results, reader deploy, re-approval). No test touches production or the installed client.

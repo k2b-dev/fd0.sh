@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/valentinkolb/fd0.sh/internal/agent"
@@ -48,7 +49,7 @@ type RecipeOpts struct {
 	Description string
 }
 
-func (o RecipeOpts) recipe(serviceName string) (*recipe.Recipe, error) {
+func (o RecipeOpts) recipe(serviceName string) *recipe.Recipe {
 	r := &recipe.Recipe{Version: recipe.Version, Service: serviceName, Command: o.Command, Dir: o.Dir,
 		Input: o.Input, Targets: o.Targets, Description: o.Description}
 	if len(r.Command) > 0 && r.Command[0] == "--" {
@@ -58,7 +59,7 @@ func (o RecipeOpts) recipe(serviceName string) (*recipe.Recipe, error) {
 		field, as, _ := strings.Cut(spec, "=")
 		r.Fields = append(r.Fields, recipe.Mapping{Field: field, As: as})
 	}
-	return r, r.Validate()
+	return r
 }
 
 // RunRecipeAdd creates a recipe, or replaces one when edit is true.
@@ -67,10 +68,7 @@ func RunRecipeAdd(ctx context.Context, o RecipeOpts, edit bool) error {
 	if err != nil {
 		return err
 	}
-	r, err := o.recipe(serviceName)
-	if err != nil {
-		return err
-	}
+	r := o.recipe(serviceName)
 	s, err := Open(ctx)
 	if err != nil {
 		return err
@@ -82,6 +80,12 @@ func RunRecipeAdd(ctx context.Context, o RecipeOpts, edit bool) error {
 	}
 	svc, err := decodeServiceRecord(*svcRec)
 	if err != nil {
+		return err
+	}
+	if err := r.ResolveNames(svc); err != nil {
+		return err
+	}
+	if err := r.Validate(); err != nil {
 		return err
 	}
 	if _, err := r.Prepare(svc); err != nil {
@@ -135,14 +139,36 @@ type recipeEntry struct {
 	Digest  string
 }
 
+// deviceHome is the home directory recipes resolve ~/ against; it is part of
+// every approval digest.
+func deviceHome() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		return "", errors.New("recipes need an absolute home directory ($HOME)")
+	}
+	return filepath.Clean(home), nil
+}
+
 // loadRecipes returns valid recipes, optionally limited to one service and
 // scope, sorted by name. Malformed recipes are reported, never run.
 func loadRecipes(s *Session, scopeID, serviceName string) ([]recipeEntry, error) {
+	entries, _, err := loadRecipesChecked(s, scopeID, serviceName)
+	return entries, err
+}
+
+// loadRecipesChecked also returns the names of recipes that cannot be used,
+// so a deploy can refuse instead of silently skipping one of its steps.
+func loadRecipesChecked(s *Session, scopeID, serviceName string) ([]recipeEntry, []string, error) {
+	home, err := deviceHome()
+	if err != nil {
+		return nil, nil, err
+	}
 	recs, err := s.ListTypedSecrets(scopeID, recipe.TypeRecipe)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := []recipeEntry{}
+	unusable := []string{}
 	for _, rec := range recs {
 		name := strings.TrimPrefix(rec.Name, recipeNamePrefix)
 		if serviceName != "" && !strings.HasPrefix(name, serviceName+"/") {
@@ -151,13 +177,15 @@ func loadRecipes(s *Session, scopeID, serviceName string) ([]recipeEntry, error)
 		r, err := decodeRecipeRecord(rec)
 		if err != nil {
 			stderrln("  ! recipe %s in %s cannot be used: %v", terminalSafe(name), scopeName(s, rec.ScopeID), err)
+			unusable = append(unusable, name)
 			continue
 		}
 		if svc, _, err := recipe.SplitName(name); err != nil || svc != r.Service {
 			stderrln("  ! recipe %s in %s names service %q; ignoring it", terminalSafe(name), scopeName(s, rec.ScopeID), r.Service)
+			unusable = append(unusable, name)
 			continue
 		}
-		out = append(out, recipeEntry{Name: name, ScopeID: rec.ScopeID, Record: rec, Recipe: r, Digest: recipe.Digest(rec.ScopeID, name, r)})
+		out = append(out, recipeEntry{Name: name, ScopeID: rec.ScopeID, Record: rec, Recipe: r, Digest: recipe.Digest(rec.ScopeID, name, r, home)})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ScopeID != out[j].ScopeID {
@@ -165,7 +193,7 @@ func loadRecipes(s *Session, scopeID, serviceName string) ([]recipeEntry, error)
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	return out, unusable, nil
 }
 
 func approvals(s *Session) (map[string]proto.RecipeApproval, error) {
@@ -555,6 +583,14 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 	if o.Target != "" && recipeName == "" {
 		return errors.New("--target needs one recipe: fd0 service deploy SERVICE/NAME --target T")
 	}
+	unlock, err := lockDeploys()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Let an interrupt finish recording the current target's result.
+	done := trackCleanup()
+	defer done()
 	stderrln("↻ syncing before deploy")
 	if err := deploySync(ctx); err != nil {
 		return fmt.Errorf("deploy: sync failed, nothing was run: %w", err)
@@ -563,8 +599,11 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 	if err != nil {
 		return err
 	}
-	home, _ := os.UserHomeDir()
-	results := []recipe.Result{}
+	home, err := deviceHome()
+	if err != nil {
+		return err
+	}
+	recorder := newResultRecorder(scopeID)
 	var failure error
 	for _, run := range runs {
 		for _, target := range run.targets {
@@ -572,27 +611,69 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 			if target != "" {
 				label += "  " + target
 			}
+			// Approval is checked again before every launch, so a revocation
+			// or lock during a long deploy stops what has not started yet.
+			if err := checkApproval(run.entry); err != nil {
+				failure = fmt.Errorf("deploy stopped before %s: %w", label, err)
+				break
+			}
 			code, err := runRecipeCommand(ctx, run, target, home, o.Verbose)
 			res := recipe.Result{Recipe: run.entry.Name, Target: target, Digest: run.entry.Digest, Source: run.source,
 				Status: "ok", ExitCode: code, At: recipe.Now().Format("2006-01-02T15:04:05Z")}
 			if err != nil {
 				res.Status = "failed"
 				stderrln("▶ %-36s ✗ %v", terminalSafe(label), err)
-				results = append(results, res)
 				failure = fmt.Errorf("deploy stopped at %s", label)
+			} else {
+				stderrln("▶ %-36s ✓ command succeeded", terminalSafe(label))
+			}
+			recorder.record(res)
+			if failure != nil {
 				break
 			}
-			stderrln("▶ %-36s ✓ command succeeded", terminalSafe(label))
-			results = append(results, res)
 		}
 		if failure != nil {
 			break
 		}
 	}
-	if err := recordResults(ctx, scopeID, results); err != nil {
-		stderrln("⚠ results not recorded: %v", err)
-	}
+	recorder.share()
 	return failure
+}
+
+// lockDeploys allows one deploy at a time on this device, so an older run
+// cannot overwrite a newer run's results. It is separate from the vault
+// lock, which is released while commands run.
+func lockDeploys() (func(), error) {
+	paths, err := fdhome.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(paths.Home, "deploy.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, errors.New("another fd0 service deploy is running on this device")
+	}
+	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
+}
+
+func checkApproval(e recipeEntry) error {
+	paths, err := fdhome.Resolve()
+	if err != nil {
+		return err
+	}
+	resp, err := agent.NewClient(paths.AgentSock).RecipeApproval(agent.RecipeApprovalReq{Action: "list"})
+	if err != nil {
+		return err
+	}
+	for _, a := range resp.Approvals {
+		if a.ScopeID == e.ScopeID && a.Name == e.Name && a.Digest == e.Digest {
+			return nil
+		}
+	}
+	return errors.New("approval was revoked or changed")
 }
 
 func prepareDeploy(ctx context.Context, o DeployOpts, serviceName, recipeName string) ([]deployRun, string, error) {
@@ -609,9 +690,14 @@ func prepareDeploy(ctx context.Context, o DeployOpts, serviceName, recipeName st
 	if err != nil {
 		return nil, "", err
 	}
-	entries, err := loadRecipes(s, svcRec.ScopeID, serviceName)
+	entries, unusable, err := loadRecipesChecked(s, svcRec.ScopeID, serviceName)
 	if err != nil {
 		return nil, "", err
+	}
+	for _, name := range unusable {
+		if recipeName == "" || name == recipeName {
+			return nil, "", fmt.Errorf("deploy: recipe %s cannot be used (see above); fix or remove it, nothing was run", name)
+		}
 	}
 	approved, err := approvals(s)
 	if err != nil {
@@ -666,16 +752,24 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	} else {
 		cmd.Dir = home
 	}
-	extra := []string{"FD0_SERVICE=" + r.Service, "FD0_RECIPE=" + run.entry.Name}
-	if target != "" {
-		extra = append(extra, "FD0_TARGET="+target)
+	// fd0's own variables are set last and never inherited, so neither the
+	// caller's environment nor a value can redirect a command.
+	base := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "FD0_TARGET=") && !strings.HasPrefix(kv, "FD0_SERVICE=") && !strings.HasPrefix(kv, "FD0_RECIPE=") {
+			base = append(base, kv)
+		}
 	}
-	extra = append(extra, run.prepared.Env...)
-	cmd.Env = mergeEnv(os.Environ(), extra)
+	meta := []string{"FD0_SERVICE=" + r.Service, "FD0_RECIPE=" + run.entry.Name}
+	if target != "" {
+		meta = append(meta, "FD0_TARGET="+target)
+	}
+	cmd.Env = mergeEnv(mergeEnv(base, run.prepared.Env), meta)
 	if run.prepared.Stdin != nil {
 		cmd.Stdin = bytes.NewReader(run.prepared.Stdin)
 	}
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	// Without verbose, stdout and stderr stay nil: the command writes straight
+	// to /dev/null, so no pipe can keep a finished command waiting.
 	if verbose {
 		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	}
@@ -690,59 +784,80 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	return -1, fmt.Errorf("command did not run: %v", err)
 }
 
-// recordResults writes one result record per target for this device and
-// shares them with a best-effort sync. Readers keep no shared results.
-func recordResults(ctx context.Context, scopeID string, results []recipe.Result) error {
-	if len(results) == 0 {
-		return nil
-	}
+// resultRecorder writes each target's result as soon as it is known, so an
+// interrupted deploy keeps the results of what already ran, then shares them
+// with one best-effort sync. Readers keep results on screen only.
+type resultRecorder struct {
+	scopeID string
+	device  string
+	host    string
+	skip    bool
+	wrote   bool
+}
+
+func newResultRecorder(scopeID string) *resultRecorder {
+	r := &resultRecorder{scopeID: scopeID}
 	paths, err := fdhome.Resolve()
-	if err != nil {
-		return err
+	if err == nil {
+		r.device, err = fdhome.EnsureDeviceID(paths.Config)
 	}
-	device, err := fdhome.EnsureDeviceID(paths.Config)
 	if err != nil {
-		return err
+		stderrln("⚠ results not recorded: %v", err)
+		r.skip = true
 	}
-	host, _ := os.Hostname()
+	r.host, _ = os.Hostname()
+	return r
+}
+
+func (r *resultRecorder) record(res recipe.Result) {
+	if r.skip {
+		return
+	}
+	// A fresh, bounded context: the command context may already be cancelled
+	// by an interrupt, and the result of what ran must still be saved.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	res.Device, res.Host = r.device, r.host
+	if err := r.write(ctx, res); err != nil {
+		stderrln("⚠ result for %s not recorded: %v", terminalSafe(res.Recipe), err)
+		return
+	}
+	r.wrote = true
+}
+
+func (r *resultRecorder) write(ctx context.Context, res recipe.Result) error {
 	s, err := Open(ctx)
 	if err != nil {
 		return err
 	}
-	st, err := s.replayAndCheckScope(scopeID)
+	defer s.Close()
+	st, err := s.replayAndCheckScope(r.scopeID)
 	if err != nil {
-		s.Close()
 		return err
 	}
-	if err := s.requireValueWrite(scopeID, st); err != nil {
-		s.Close()
+	if err := s.requireValueWrite(r.scopeID, st); err != nil {
+		r.skip = true
 		stderrln("  results stay on screen only: %v", err)
 		return nil
 	}
-	for _, res := range results {
-		res.Device, res.Host = device, host
-		name := resultNamePrefix + recipe.ResultName(res.Recipe, res.Target, device)
-		if _, err := s.GetTypedSecret(scopeID, name); err == nil {
-			err = s.UpdateTypedSecret(ctx, scopeID, name, recipe.TypeResult, recipe.TypeResult, res)
-			if err != nil {
-				s.Close()
-				return err
-			}
-		} else if errors.Is(err, ErrTypedSecretNotFound) {
-			if err := s.CreateTypedSecret(ctx, scopeID, name, recipe.TypeResult, res); err != nil {
-				s.Close()
-				return err
-			}
-		} else {
-			s.Close()
-			return err
-		}
+	name := resultNamePrefix + recipe.ResultName(res.Recipe, res.Target, r.device)
+	if _, err := s.GetTypedSecret(r.scopeID, name); err == nil {
+		return s.UpdateTypedSecret(ctx, r.scopeID, name, recipe.TypeResult, recipe.TypeResult, res)
+	} else if !errors.Is(err, ErrTypedSecretNotFound) {
+		return err
 	}
-	s.Close()
+	return s.CreateTypedSecret(ctx, r.scopeID, name, recipe.TypeResult, res)
+}
+
+func (r *resultRecorder) share() {
+	if !r.wrote {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 	if err := deploySync(ctx); err != nil {
-		return fmt.Errorf("results saved locally; share them with fd0 sync: %w", err)
+		stderrln("⚠ results saved on this device; share them with fd0 sync: %v", err)
 	}
-	return nil
 }
 
 func loadResults(s *Session, scopeID, recipeName string) ([]recipe.Result, error) {
@@ -760,7 +875,7 @@ func loadResults(s *Session, scopeID, recipeName string) ([]recipe.Result, error
 			continue
 		}
 		res, err := recipe.DecodeResult(raw)
-		if err != nil || res.Recipe != recipeName {
+		if err != nil || res.Recipe != recipeName || !res.Consistent(strings.TrimPrefix(rec.Name, resultNamePrefix)) {
 			continue
 		}
 		out = append(out, *res)
@@ -772,14 +887,17 @@ func loadResults(s *Session, scopeID, recipeName string) ([]recipe.Result, error
 // servicesRecipeNames reports recipe names that depend on a service, for
 // operations that would orphan them.
 func servicesRecipeNames(s *Session, scopeID, serviceName string) []string {
-	entries, err := loadRecipes(s, scopeID, serviceName)
+	recs, err := s.ListTypedSecrets(scopeID, "")
 	if err != nil {
 		return nil
 	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name)
+	names := []string{}
+	for _, rec := range recs {
+		if name, ok := strings.CutPrefix(rec.Name, recipeNamePrefix+serviceName+"/"); ok {
+			names = append(names, serviceName+"/"+name)
+		}
 	}
+	sort.Strings(names)
 	return names
 }
 

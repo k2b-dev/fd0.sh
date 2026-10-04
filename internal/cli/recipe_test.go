@@ -194,3 +194,88 @@ func recipeResults(t *testing.T, ctx context.Context, scope, name string) []reci
 	}
 	return rs
 }
+
+// TestRecipeReviewGuards covers the review findings: env names are pinned in
+// the recipe, an unusable recipe blocks a deploy, one deploy runs at a time,
+// and forged results are ignored.
+func TestRecipeReviewGuards(t *testing.T) {
+	dir := serviceTestEnv(t)
+	ctx, scope := newTestVault(t)
+	saved := deploySync
+	deploySync = func(context.Context) error { return nil }
+	t.Cleanup(func() { deploySync = saved })
+	out := filepath.Join(dir, "env-out")
+	t.Setenv("RECIPE_OUT", out)
+	if err := RunServiceAdd(ctx, ServiceAddOpts{Name: "app", Scope: scope}); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	withStdio(t, dir, "token-value", func() {
+		err = RunServiceSet(ctx, ServiceSetOpts{Name: "app", Scope: scope, Field: "token", Env: "APP_TOKEN"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The env name is copied into the recipe at creation.
+	r := RecipeOpts{Name: "app/env", Scope: scope, Command: []string{"/bin/sh", "-c", `env | grep -E '^(APP_TOKEN|LD_PRELOAD)=' > "$RECIPE_OUT"`},
+		Fields: []string{"token"}, Input: "env"}
+	if err := RunRecipeAdd(ctx, r, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := approveRecipe(ctx, scope, "app/env", recipeDigest(t, ctx, scope, "app/env"), goodAuth()); err != nil {
+		t.Fatal(err)
+	}
+	// A later change of the field's env name in the service does not change
+	// what the approved recipe passes.
+	withStdio(t, dir, "token-value", func() {
+		err = RunServiceSet(ctx, ServiceSetOpts{Name: "app", Scope: scope, Field: "token", Env: "LD_PRELOAD"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunServiceDeploy(ctx, DeployOpts{Name: "app/env"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "APP_TOKEN=token-value\n" {
+		t.Fatalf("env after service rename: %q", got)
+	}
+	if err := RunRecipeAdd(ctx, RecipeOpts{Name: "app/reserved", Scope: scope, Command: r.Command, Fields: []string{"token=FD0_TARGET"}, Input: "env"}, false); err == nil {
+		t.Fatal("reserved variable accepted")
+	}
+
+	// Only one deploy at a time on a device.
+	unlock, err := lockDeploys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunServiceDeploy(ctx, DeployOpts{Name: "app/env"}); err == nil || !strings.Contains(err.Error(), "another fd0 service deploy") {
+		t.Fatalf("concurrent deploy: %v", err)
+	}
+	unlock()
+
+	// An unusable recipe in the selection stops the whole deploy.
+	s, err := Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTypedSecret(ctx, scope, recipeNamePrefix+"app/broken", "fd0.recipe", map[string]any{"version": 99}); err != nil {
+		t.Fatal(err)
+	}
+	// A forged result naming another device is ignored.
+	forged := map[string]any{"recipe": "app/env", "target": "", "device": "someone-else", "status": "ok", "at": "2030-01-01T00:00:00Z"}
+	if err := s.CreateTypedSecret(ctx, scope, resultNamePrefix+"app/env/-/my-device", "fd0.deploy-result", forged); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if err := RunServiceDeploy(ctx, DeployOpts{Name: "app"}); err == nil || !strings.Contains(err.Error(), "app/broken cannot be used") {
+		t.Fatalf("unusable recipe skipped: %v", err)
+	}
+	for _, res := range recipeResults(t, ctx, scope, "app/env") {
+		if res.Device == "someone-else" {
+			t.Fatal("forged result shown")
+		}
+	}
+	if err := RunServiceRename(ctx, scope, "app", "app-2", false); err == nil {
+		t.Fatal("rename ignored an unusable recipe")
+	}
+}

@@ -28,7 +28,7 @@ func testService(t *testing.T) *service.Service {
 
 func valid() *Recipe {
 	return &Recipe{Version: Version, Service: "shop-db", Command: []string{"/bin/sh", "-c", "cat"},
-		Fields: []Mapping{{Field: "db-password"}}, Input: InputSystemdEnv}
+		Fields: []Mapping{{Field: "db-password", As: "DB_PASSWORD"}}, Input: InputSystemdEnv}
 }
 
 func TestValidateRejectsUnsafeDefinitions(t *testing.T) {
@@ -45,6 +45,11 @@ func TestValidateRejectsUnsafeDefinitions(t *testing.T) {
 		"nul in argument":    func(r *Recipe) { r.Command = append(r.Command, "a\x00b") },
 		"k8s without secret": func(r *Recipe) { r.Input = "stdin:k8s-secret:app" },
 		"newer version":      func(r *Recipe) { r.Version = Version + 1 },
+		"implicit env name":  func(r *Recipe) { r.Fields[0].As = "" },
+		"reserved name":      func(r *Recipe) { r.Fields[0].As = "FD0_TARGET" },
+		"duplicate name": func(r *Recipe) {
+			r.Fields = append(r.Fields, Mapping{Field: "region", As: "DB_PASSWORD"})
+		},
 	} {
 		r := valid()
 		mutate(r)
@@ -76,10 +81,10 @@ func TestDecodeRefusesUnknownFieldsAndNewerVersions(t *testing.T) {
 }
 
 func TestDigestPinsExecutionButNotDescription(t *testing.T) {
-	base := Digest("s_scope", "shop-db/apps", valid())
+	base := Digest("s_scope", "shop-db/apps", valid(), "/home/u")
 	same := valid()
 	same.Description = "documentation only"
-	if Digest("s_scope", "shop-db/apps", same) != base {
+	if Digest("s_scope", "shop-db/apps", same, "/home/u") != base {
 		t.Fatal("description changed the digest")
 	}
 	for name, mutate := range map[string]func(*Recipe){
@@ -91,11 +96,14 @@ func TestDigestPinsExecutionButNotDescription(t *testing.T) {
 	} {
 		r := valid()
 		mutate(r)
-		if Digest("s_scope", "shop-db/apps", r) == base {
+		if Digest("s_scope", "shop-db/apps", r, "/home/u") == base {
 			t.Fatalf("%s change kept the digest", name)
 		}
 	}
-	if Digest("s_other", "shop-db/apps", valid()) == base || Digest("s_scope", "shop-db/other", valid()) == base {
+	if Digest("s_scope", "shop-db/apps", valid(), "/home/other") == base {
+		t.Fatal("home not pinned")
+	}
+	if Digest("s_other", "shop-db/apps", valid(), "/home/u") == base || Digest("s_scope", "shop-db/other", valid(), "/home/u") == base {
 		t.Fatal("scope or name not pinned")
 	}
 }
@@ -103,7 +111,7 @@ func TestDigestPinsExecutionButNotDescription(t *testing.T) {
 func TestPrepareRendersEachInput(t *testing.T) {
 	svc := testService(t)
 	r := valid()
-	r.Fields = []Mapping{{Field: "db-password", As: "PGPASSWORD"}, {Field: "region"}}
+	r.Fields = []Mapping{{Field: "db-password", As: "PGPASSWORD"}, {Field: "region", As: "REGION"}}
 	p, err := r.Prepare(svc)
 	if err != nil {
 		t.Fatal(err)
@@ -123,11 +131,11 @@ func TestPrepareRendersEachInput(t *testing.T) {
 	if p, err = r.Prepare(svc); err != nil || !strings.Contains(string(p.Stdin), "DATABASE_PASSWORD:") || !strings.Contains(string(p.Stdin), "namespace: app") {
 		t.Fatalf("k8s: %s %v", p.Stdin, err)
 	}
-	r.Input, r.Fields = InputEnv, []Mapping{{Field: "missing"}}
+	r.Input, r.Fields = InputEnv, []Mapping{{Field: "missing", As: "X"}}
 	if _, err := r.Prepare(svc); err == nil {
 		t.Fatal("missing field accepted")
 	}
-	r.Fields = []Mapping{{Field: "ca.crt"}}
+	r.Fields = []Mapping{{Field: "ca.crt", As: "CA"}}
 	if _, err := r.Prepare(svc); err == nil {
 		t.Fatal("file field passed through the environment")
 	}
@@ -144,5 +152,31 @@ func TestSplitNameAndResultName(t *testing.T) {
 	}
 	if ResultName("shop-db/apps", "", "dev1") != "shop-db/apps/-/dev1" {
 		t.Fatal("result name without target")
+	}
+}
+
+func TestResolveNamesStoresEnvNames(t *testing.T) {
+	svc := testService(t)
+	r := valid()
+	r.Fields = []Mapping{{Field: "db-password"}, {Field: "region", As: "AWS_REGION"}}
+	if err := r.ResolveNames(svc); err != nil {
+		t.Fatal(err)
+	}
+	if r.Fields[0].As != "DB_PASSWORD" || r.Fields[1].As != "AWS_REGION" {
+		t.Fatalf("names: %+v", r.Fields)
+	}
+	r.Fields = []Mapping{{Field: "ca.crt"}}
+	if err := r.ResolveNames(svc); err == nil {
+		t.Fatal("field without env name resolved")
+	}
+}
+
+func TestResultConsistency(t *testing.T) {
+	res := Result{Recipe: "shop-db/apps", Target: "app-1", Device: "dev1", Status: "ok"}
+	if !res.Consistent("shop-db/apps/app-1/dev1") {
+		t.Fatal("consistent result rejected")
+	}
+	if res.Consistent("shop-db/apps/app-1/dev2") || res.Consistent("shop-db/other/app-1/dev1") {
+		t.Fatal("mismatched result accepted")
 	}
 }

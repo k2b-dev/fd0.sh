@@ -183,10 +183,20 @@ func (r *Recipe) Validate() error {
 func (r *Recipe) validateInput() error {
 	switch r.Input {
 	case InputEnv, InputSystemdEnv, InputDockerEnv, InputShell:
+		names := map[string]bool{}
 		for _, m := range r.Fields {
-			if m.As != "" && !envRE.MatchString(m.As) {
-				return fmt.Errorf("recipe: %q is not a valid environment variable name", m.As)
+			// Names are stored, never taken from the service at run time, so
+			// the approval covers exactly which variables a command receives.
+			if !envRE.MatchString(m.As) {
+				return fmt.Errorf("recipe: field %q needs a valid variable name (FIELD=NAME); got %q", m.Field, m.As)
 			}
+			if strings.HasPrefix(m.As, "FD0_") {
+				return fmt.Errorf("recipe: %s is reserved for fd0", m.As)
+			}
+			if names[m.As] {
+				return fmt.Errorf("recipe: variable %s is used twice", m.As)
+			}
+			names[m.As] = true
 		}
 		return nil
 	case InputFile:
@@ -199,10 +209,19 @@ func (r *Recipe) validateInput() error {
 		if ns == "" || name == "" {
 			return errors.New("recipe: use stdin:k8s-secret:NAMESPACE/SECRET")
 		}
+		keys := map[string]bool{}
 		for _, m := range r.Fields {
-			if m.As != "" && !k8sKeyRE.MatchString(m.As) {
-				return fmt.Errorf("recipe: %q is not a valid Secret key", m.As)
+			key := m.As
+			if key == "" {
+				key = m.Field
 			}
+			if !k8sKeyRE.MatchString(key) {
+				return fmt.Errorf("recipe: %q is not a valid Secret key", key)
+			}
+			if keys[key] {
+				return fmt.Errorf("recipe: Secret key %s is used twice", key)
+			}
+			keys[key] = true
 		}
 		return nil
 	}
@@ -234,9 +253,13 @@ func ExpandHome(p, home string) string {
 // and every part of the definition that affects what runs or what it
 // receives. The description is left out, so editing it needs no new
 // approval; anything else does.
-func Digest(scopeID, recordName string, r *Recipe) string {
+//
+// home is this device's home directory, against which ~/ and the default
+// working directory resolve; a different home needs a new approval.
+func Digest(scopeID, recordName string, r *Recipe, home string) string {
 	canonical := struct {
 		Domain  string    `json:"domain"`
+		Home    string    `json:"home"`
 		Scope   string    `json:"scope"`
 		Name    string    `json:"name"`
 		Version int       `json:"version"`
@@ -246,10 +269,34 @@ func Digest(scopeID, recordName string, r *Recipe) string {
 		Fields  []Mapping `json:"fields"`
 		Input   string    `json:"input"`
 		Targets []string  `json:"targets"`
-	}{"fd0-recipe-approval-v1", scopeID, recordName, r.Version, r.Service, r.Command, r.Dir, r.Fields, r.Input, r.Targets}
+	}{"fd0-recipe-approval-v1", home, scopeID, recordName, r.Version, r.Service, r.Command, r.Dir, r.Fields, r.Input, r.Targets}
 	raw, _ := json.Marshal(canonical)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+// ResolveNames fills empty variable names from the service's env names, so a
+// saved recipe always states them explicitly.
+func (r *Recipe) ResolveNames(svc *service.Service) error {
+	switch r.Input {
+	case InputEnv, InputSystemdEnv, InputDockerEnv, InputShell:
+	default:
+		return nil
+	}
+	for i, m := range r.Fields {
+		if m.As != "" {
+			continue
+		}
+		f, err := svc.Field(m.Field)
+		if err != nil {
+			return fmt.Errorf("recipe: service %q: %w", r.Service, err)
+		}
+		if f.Env == "" {
+			return fmt.Errorf("recipe: field %q has no env name; write it as %s=NAME", m.Field, m.Field)
+		}
+		r.Fields[i].As = f.Env
+	}
+	return nil
 }
 
 // Prepared is what one run of a recipe hands to its command.
@@ -271,9 +318,7 @@ func (r *Recipe) Prepare(svc *service.Service) (*Prepared, error) {
 	switch r.Input {
 	case InputEnv, InputSystemdEnv, InputDockerEnv, InputShell:
 		for i, m := range r.Fields {
-			if m.As != "" {
-				fields[i].Env = m.As
-			}
+			fields[i].Env = m.As
 		}
 		if r.Input == InputEnv {
 			env, err := service.ExecEnv(fields)
@@ -340,6 +385,12 @@ func DecodeResult(raw []byte) (*Result, error) {
 		return nil, fmt.Errorf("deploy result: decode: %w", err)
 	}
 	return &r, nil
+}
+
+// Consistent reports whether a result record's payload matches its name, so a
+// record cannot claim to be another recipe's, target's or device's result.
+func (res *Result) Consistent(recordName string) bool {
+	return recordName == ResultName(res.Recipe, res.Target, res.Device) && (res.Status == "ok" || res.Status == "failed")
 }
 
 // SortResults orders results by target, then newest first.
