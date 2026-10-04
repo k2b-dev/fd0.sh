@@ -357,7 +357,8 @@ fd0 recipe add shop-db/apps --field db-password --stdin systemd-env --for app-1,
 fd0 recipe add shop-db/k8s --field db-password=DATABASE_PASSWORD --stdin k8s-secret:shop/db \
   -- /bin/sh -c 'kubectl --context prod apply --server-side -f - && kubectl --context prod -n shop rollout restart deploy/shop'
 fd0 recipe approve shop-db/apps        # per device, shows the command, fresh authentication (person in a terminal)
-fd0 service deploy shop-db             # sync, then every approved recipe in name order, stop at the first failure
+fd0 recipe approve shop-db/k8s
+fd0 service deploy shop-db             # sync, then all recipes in name order; refuses if one is not approved
 fd0 service deploy shop-db/apps --target app-2
 fd0 recipe show shop-db/apps           # definition, approval on this device, last result per target and device
 ```

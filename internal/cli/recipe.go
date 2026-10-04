@@ -774,7 +774,7 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 		cmd.Stdin = bytes.NewReader(run.prepared.Stdin)
 	}
 	// A descendant that keeps stdin open must not hold a finished command.
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = 3 * time.Second
 	// Without verbose, stdout and stderr stay nil: the command writes straight
 	// to /dev/null, so no pipe can keep a finished command waiting.
 	if verbose {
@@ -822,7 +822,9 @@ func (r *resultRecorder) record(res recipe.Result) {
 	}
 	// A fresh, bounded context: the command context may already be cancelled
 	// by an interrupt, and the result of what ran must still be saved.
-	ctx, cancel := context.WithTimeout(context.Background(), InterruptCleanupWindow-2*time.Second)
+	// WaitDelay plus this budget fits the interrupt cleanup window; saving is
+	// still best effort when the vault is busy.
+	ctx, cancel := context.WithTimeout(context.Background(), InterruptCleanupWindow-5*time.Second)
 	defer cancel()
 	res.Device, res.Host = r.device, r.host
 	if err := r.write(ctx, res); err != nil {

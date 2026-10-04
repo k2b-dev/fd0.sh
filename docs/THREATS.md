@@ -877,7 +877,8 @@ tools or configuration it calls (`kubectl` contexts, SSH aliases): those
 remain the operator's trust. fd0 never puts values into arguments, sets its
 own `FD0_*` variables last and refuses them as value names, discards command
 output unless `--verbose`, and re-checks the approval before every launch so a
-revocation or lock stops what has not started. Deploy results are ordinary
+revocation or lock stops what has not started. After an interrupt fd0 tries,
+within a bounded window, to record the result of the target that was running. Deploy results are ordinary
 scope records written by the deploying device and contain no values. They
 are reports from a scope writer, not authenticated device attestations, and a
 successful command does not prove an application uses a value. Two devices
