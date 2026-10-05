@@ -475,6 +475,13 @@ for bin in $OPTIONAL_BINARIES; do
         MISSING_OPTIONAL_BINARIES="$MISSING_OPTIONAL_BINARIES $bin"
     fi
 done
+# Start the new CLI once before replacing anything, so a build that cannot
+# run here (for example the YubiKey flavor without libpcsclite) leaves the
+# installed version untouched.
+chmod 700 "$TMP/fd0"
+if ! probe_out=$("$TMP/fd0" version 2>&1); then
+    die "the new fd0 does not start on this system, nothing was installed: $(printf '%s' "$probe_out" | head -c 300)"
+fi
 for bin in $MISSING_OPTIONAL_BINARIES; do
     if [ -n "$CURRENT" ] && { [ -e "$PREFIX/$bin" ] || [ -L "$PREFIX/$bin" ]; }; then
         REMOVE_BIN "$PREFIX/$bin"

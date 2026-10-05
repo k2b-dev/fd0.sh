@@ -860,6 +860,14 @@ func installClientBinaries(srcDir, prefix string) error {
 			}
 		}
 	}()
+	// Start every new binary once before replacing anything, so a build that
+	// cannot run here (for example the YubiKey flavor without libpcsclite)
+	// leaves the installed version untouched.
+	for _, s := range staged {
+		if err := probeStagedBinary(s.tmp, s.name); err != nil {
+			return err
+		}
+	}
 	var installed []stagedUpdateBinary
 	for i := range staged {
 		if _, err := os.Stat(staged[i].dst); err == nil {
@@ -891,6 +899,24 @@ func installClientBinaries(srcDir, prefix string) error {
 		if s.backup != "" {
 			_ = os.Remove(s.backup)
 		}
+	}
+	return nil
+}
+
+func probeStagedBinary(path, name string) error {
+	arg := "version"
+	if name != "fd0" {
+		arg = "--version"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, arg).CombinedOutput()
+	line := strings.TrimSpace(string(out))
+	if err != nil || !strings.HasPrefix(line, name+" ") {
+		if len(line) > 300 {
+			line = line[:300]
+		}
+		return fmt.Errorf("update: the new %s does not start on this system, nothing was replaced: %s (%v)", name, line, err)
 	}
 	return nil
 }

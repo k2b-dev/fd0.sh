@@ -549,3 +549,41 @@ func fakeCosign(t *testing.T, accept bool) string {
 type ioDiscard struct{}
 
 func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
+
+// A release build that cannot start on this system (for example the YubiKey
+// flavor without libpcsclite) must leave the installed binaries untouched.
+func TestRunUpdateKeepsInstalledVersionWhenNewBinaryCannotStart(t *testing.T) {
+	archive := makeUpdateArchive(t, map[string]string{
+		"fd0":       "#!/bin/sh\necho 'error while loading shared libraries: libpcsclite.so.1' >&2\nexit 127\n",
+		"fd0-agent": "#!/bin/sh\necho fd0-agent 0.9.0\n",
+	})
+	sum := sha256.Sum256(archive)
+	downloads := updateFixtureServer(t, map[string]updateFixtureArchive{
+		"fd0_linux_amd64.tar.gz": {Body: archive, Sum: hex.EncodeToString(sum[:])},
+	})
+	defer downloads.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `[{"name":"client-v0.9.0","tag_name":"v0.9.0","draft":false,"prerelease":false}]`)
+	}))
+	defer api.Close()
+	prefix := t.TempDir()
+	old := "#!/bin/sh\necho fd0 0.8.5 standard\n"
+	if err := os.WriteFile(filepath.Join(prefix, "fd0"), []byte(old), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	err := RunUpdate(context.Background(), UpdateOptions{
+		CurrentVersion: "0.8.5", Version: "latest", Prefix: prefix, Yes: true,
+		APIBase: api.URL, ReleaseBase: downloads.URL, HTTPClient: downloads.Client(),
+		Stdout: &out, Stderr: &stderr, GOOS: "linux", GOARCH: "amd64", cosignPath: fakeCosign(t, true),
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not start on this system") || !strings.Contains(err.Error(), "libpcsclite") {
+		t.Fatalf("broken binary installed or unclear error: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(prefix, "fd0")); string(got) != old {
+		t.Fatal("installed fd0 was replaced")
+	}
+	if _, err := os.Stat(filepath.Join(prefix, "fd0-agent")); !os.IsNotExist(err) {
+		t.Fatal("fd0-agent was installed although fd0 cannot start")
+	}
+}
