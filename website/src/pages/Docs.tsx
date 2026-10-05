@@ -1197,22 +1197,23 @@ $ fd0 service show pg-1`}</Box>
       on stdin or in the environment and runs it. Before and after steps, such
       as a restart, belong in the command.
     </P>
-    <Box>{`$ fd0 recipe add pg-1/apps --field db-password --stdin systemd-env \\
+    <Box>{`$ fd0 recipe add pg-1/apps --field db-password --input systemd-env \\
     --for app-1,app-2 -- /bin/sh -c \\
-    'ssh "$FD0_TARGET" "sudo install -m 600 /dev/stdin /etc/app.env && sudo systemctl restart app"'
+    'ssh "$FD0_TARGET" "sudo install -m 600 /dev/stdin /etc/app.env && sudo systemctl restart app" <&3'
 $ fd0 recipe approve pg-1/apps      # once per device
+$ fd0 service deploy pg-1 --dry-run # what would run, nothing executed
 $ fd0 service deploy pg-1`}</Box>
     <Cmd
-      signature="fd0 recipe add <service>/<name> --field <f[=NAME]> (--stdin <format> | --env) [--for <targets>] -- <program> …"
-      body="Save a recipe. Formats: systemd-env, docker-env, sh, file (one field) and k8s-secret:NAMESPACE/SECRET. With --for, the command runs once per target with $FD0_TARGET set. The program must be an absolute path or start with ~/."
+      signature="fd0 recipe add <service>/<name> --field <f[=NAME]> (--input <format> | --stdin <format> | --env) [--for <targets>] -- <program> …"
+      body="Save a recipe. --input passes the fields on file descriptor 3 ($FD0_INPUT, read with <&3) and keeps stdin empty, so ssh or a tunnel started first cannot consume them; --stdin and --env are the alternatives. Formats: systemd-env, docker-env, sh, file (one field) and k8s-secret:NAMESPACE/SECRET. With --for, the command runs once per target with $FD0_TARGET set. The program must be an absolute path or start with ~/."
     />
     <Cmd
       signature="fd0 recipe approve <service>/<name>"
       body="Show the recipe and allow this device to run it, after authenticating again. Any change to the recipe needs a new approval on every device; changing a value does not."
     />
     <Cmd
-      signature="fd0 service deploy <service>[/<name>] [--target <t>] [-v]"
-      body="Sync, then run the service's approved recipes in name order and stop at the first failure. Output stays hidden unless -v, because it can contain values."
+      signature="fd0 service deploy <service>[/<name>] [--target <t>] [--dry-run] [-v]"
+      body="Sync, then run the service's approved recipes in name order and stop at the first failure. --dry-run shows what would run and runs nothing. Output stays hidden unless -v, because it can contain values."
     />
     <Cmd
       signature="fd0 recipe show <service>/<name>"
@@ -1222,11 +1223,10 @@ $ fd0 service deploy pg-1`}</Box>
       A recipe is code that anyone who can write to the scope can change.
       Approving one lets this device run it as your user, with your files and
       SSH agent; fd0 does not sandbox it or check the scripts and tool
-      configuration it calls. Review what you approve. stdin is shared with
-      every program the command starts: if a script runs ssh or a tunnel
-      helper before it uses the value, read the value first and give those
-      programs &lt;/dev/null, or they consume it. Try a new recipe on one
-      target first. Update every device in
+      configuration it calls. Review what you approve. Prefer --input over
+      --stdin: stdin is shared with every program the command starts, and ssh
+      or a tunnel helper started first can consume the value. Check a new
+      recipe with --dry-run and deploy one target first. Update every device in
       the scope to fd0 0.21.0 or later before you add recipes; older versions
       show them as plain secrets.
     </Note>

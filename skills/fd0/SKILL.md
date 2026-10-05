@@ -352,10 +352,11 @@ fd0 run --service pg-1 -- ./migrate.sh               # env-named fields as envir
 A recipe saves a deploy command next to its service so every device can repeat it. It is a record `SERVICE/NAME` in the service's scope:
 
 ```sh
-fd0 recipe add shop-db/apps --field db-password --stdin systemd-env --for app-1,app-2 \
-  -- /bin/sh -c 'ssh "$FD0_TARGET" "sudo install -m 600 /dev/stdin /etc/shop/env && sudo systemctl restart shop"'
-fd0 recipe add shop-db/k8s --field db-password=DATABASE_PASSWORD --stdin k8s-secret:shop/db \
-  -- /bin/sh -c 'kubectl --context prod apply --server-side -f - && kubectl --context prod -n shop rollout restart deploy/shop'
+fd0 recipe add shop-db/apps --field db-password --input systemd-env --for app-1,app-2 \
+  -- /bin/sh -c 'ssh "$FD0_TARGET" "sudo install -m 600 /dev/stdin /etc/shop/env && sudo systemctl restart shop" <&3'
+fd0 recipe add shop-db/k8s --field db-password=DATABASE_PASSWORD --input k8s-secret:shop/db \
+  -- /bin/sh -c 'kubectl --context prod apply -f - <&3 && kubectl --context prod -n shop rollout restart deploy/shop'
+fd0 service deploy shop-db --dry-run      # what would run per recipe and target; runs and records nothing
 fd0 recipe approve shop-db/apps        # per device, shows the command, fresh authentication (person in a terminal)
 fd0 recipe approve shop-db/k8s
 fd0 service deploy shop-db             # sync, then all recipes in name order; refuses if one is not approved
@@ -363,9 +364,9 @@ fd0 service deploy shop-db/apps --target app-2
 fd0 recipe show shop-db/apps           # definition, approval on this device, last result per target and device
 ```
 
-- Values arrive on stdin (`--stdin systemd-env|docker-env|sh|file|k8s-secret:NS/SECRET`) or in the environment (`--env`), never as arguments. Fields are explicit; `FIELD=NAME` sets the variable or Secret key, otherwise the field's env name is copied into the recipe. `$FD0_TARGET`, `$FD0_SERVICE` and `$FD0_RECIPE` are set by fd0.
+- Values arrive on file descriptor 3 (`--input systemd-env|docker-env|sh|file|k8s-secret:NS/SECRET`, read with `<&3` or `$FD0_INPUT`; stdin stays empty; prefer this), on stdin (`--stdin FORMAT`) or in the environment (`--env`), never as arguments. Fields are explicit; `FIELD=NAME` sets the variable or Secret key, otherwise the field's env name is copied into the recipe. `$FD0_TARGET`, `$FD0_SERVICE` and `$FD0_RECIPE` are set by fd0.
 - The program must be an absolute path or `~/…`. Before and after steps belong in the command (an inline `/bin/sh -c '…'`), so the approval covers them.
-- stdin is shared with everything the command starts. If a script runs other programs before the value is used — `ssh`, a tunnel helper, anything that reads stdin — read the value first (`value=$(cat)`; `[ -n "$value" ] || exit 1`) and give the other programs `</dev/null`; otherwise they swallow the value and an empty one gets written. Test a new recipe on one target first (`--target`).
+- With `--stdin`, stdin is shared with everything the command starts: `ssh` or a tunnel helper run first can swallow the value and an empty one gets written. Use `--input` (fd 3) instead. Check a new recipe with `--dry-run`, then deploy one target first (`--target`).
 - An approval pins the exact definition and this device's home directory. Any edit needs `fd0 recipe approve` again on every device; value rotations do not. Approving lets this device run the command as the user; it does not sandbox it or cover scripts and tool configuration it calls.
 - Agents must not approve recipes and must not run `fd0 service deploy` unless the user asked for that deploy; recipes are code a scope writer can change, and approval is the user's decision. Never pass `-v` without need: command output can contain values.
 - Results are written by the deploying device after each target and synced; readers can deploy but their results stay on screen. Results are reports, not proof that an application uses a value.
