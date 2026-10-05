@@ -1222,7 +1222,11 @@ $ fd0 service deploy pg-1`}</Box>
       A recipe is code that anyone who can write to the scope can change.
       Approving one lets this device run it as your user, with your files and
       SSH agent; fd0 does not sandbox it or check the scripts and tool
-      configuration it calls. Review what you approve. Update every device in
+      configuration it calls. Review what you approve. stdin is shared with
+      every program the command starts: if a script runs ssh or a tunnel
+      helper before it uses the value, read the value first and give those
+      programs &lt;/dev/null, or they consume it. Try a new recipe on one
+      target first. Update every device in
       the scope to fd0 0.21.0 or later before you add recipes; older versions
       show them as plain secrets.
     </Note>

@@ -74,6 +74,8 @@ Phase 3 is convenience on top of phase 2: everything could be done with `fd0 run
 
 **Results.** Each device writes one record per recipe target, `deploy:SERVICE/NAME/TARGET/DEVICE`, with status, exit code, time, host name, the recipe digest and the delivered service event, then syncs. Only that device writes its records, so results from several devices never conflict. Readers can approve and deploy but cannot publish results. `fd0 recipe show` lists the latest result per target and device. Results never contain values.
 
+**Operating lesson (2026-10-05).** In the first real recipe, a tunnel helper ran `ssh` before `kubectl` read the value; `ssh` consumed stdin and an empty Secret was written to one target before the run stopped. Recipes that start other programs first must read the value up front and refuse an empty one; the skill and website say so. A later improvement could deliver stdin input on a separate file descriptor instead.
+
 **Limits.** Two devices deploying different revisions at the same moment can still race; the destination or one deploying device per target must serialize. fd0 cannot know whether a command used the values safely. Clients before 0.21 do not know recipes: they hide them from `service` commands but can list or delete them as plain secrets, so update every device of a scope before adding recipes there. Desktop hides recipes and results in this version.
 
 ## Verification plan
