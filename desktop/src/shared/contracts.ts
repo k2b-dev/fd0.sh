@@ -68,7 +68,7 @@ export type RecipeView = {
 };
 export type RecipeApproveInput = UnlockInput & { scopeId: string; name: string; digest: string };
 export type RecipeDeployInput = { scopeId: string; name: string; target?: string };
-export type RecipeDeployResult = { results: RecipeResult[]; error?: string };
+export type RecipeDeployResult = { results: RecipeResult[]; error?: string; cancelled?: boolean };
 
 export type UnlockInput = {
   method?: string;

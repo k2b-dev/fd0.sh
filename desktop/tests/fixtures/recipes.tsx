@@ -1,9 +1,10 @@
 import { render } from "solid-js/web";
 import { RecipesPanel } from "../../src/renderer/src/features/RecipesPanel";
+import { createVaultStore, VaultContext } from "../../src/renderer/src/lib/store";
 import type { RecipeView, VaultStatus } from "../../src/shared/contracts";
 import "../../src/renderer/src/styles.css";
 
-const script = "set -eu\nvalue=$(cat <&3)\nkubectl -n \"org-k2b-$FD0_TARGET\" apply -f -\n";
+const script = "set -eu\nvalue=$(cat <&3)\nkubectl -n \"org-k2b-$FD0_TARGET\" apply -f -";
 const status: VaultStatus = { vaultExists: true, agentRunning: true, unlocked: true, yubikey: false,
   authMethods: [{ id: "pass", type: "passphrase", label: "Passphrase", default: true }] } as VaultStatus;
 let approved = new URLSearchParams(location.search).get("approved") !== "0";
@@ -28,9 +29,11 @@ Object.defineProperty(window, "fd0", { value: {
   },
   recipeDeploy: async (input: { name: string; target?: string }) => {
     calls.push(`deploy:${input.name}:${input.target ?? ""}`);
-    return { results: [] };
+    // Main confirms natively; a reader's result is returned but not stored.
+    return { results: [{ recipe: "docs/k8s-1", target: input.target || "fibel", device: "reader-dev", host: "reader-laptop", digest: "", source: "", status: "ok", exitCode: 0, at: "2026-10-05T15:00:00Z" }] };
   },
 } });
-render(() => <div style="max-width:760px;padding:24px"><RecipesPanel scopeId="s_test" service="docs" status={status} /></div>, document.body);
+const vault = createVaultStore();
+render(() => <VaultContext.Provider value={vault}><div style="max-width:760px;padding:24px"><RecipesPanel scopeId="s_test" service="docs" status={status} /></div></VaultContext.Provider>, document.body);
 declare global { interface Window { recipeCalls: string[] } }
 window.recipeCalls = calls;

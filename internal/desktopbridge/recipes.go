@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -91,31 +92,81 @@ func (s *Service) recipeApprove(ctx context.Context, p RecipeApproveParams) (Rec
 	return s.recipeList(ctx, RecipeListParams{ScopeID: p.ScopeID, Service: serviceName})
 }
 
-// recipeDeploy runs a deploy and returns each target's result. A failed
-// command is a result, not a bridge error, so Desktop can show it in place.
-func (s *Service) recipeDeploy(ctx context.Context, p RecipeDeployParams) (RecipeDeployResult, error) {
+// Deploys run as background jobs: the bridge serves one request at a time,
+// so a deploy that takes minutes must not block status polling.
+type deployJob struct {
+	mu      sync.Mutex
+	done    bool
+	results []recipe.Result
+	err     string
+}
+
+type RecipeDeployStarted struct {
+	JobID string `json:"jobId"`
+}
+
+type RecipeDeployStatus struct {
+	Done    bool            `json:"done"`
+	Results []recipe.Result `json:"results"`
+	Error   string          `json:"error,omitempty"`
+}
+
+var (
+	deployJobsMu sync.Mutex
+	deployJobs   = map[string]*deployJob{}
+	deployJobSeq int
+)
+
+// recipeDeploy starts a deploy and returns at once. A failed command is a
+// result, not a bridge error, so Desktop can show it in place.
+func (s *Service) recipeDeploy(_ context.Context, p RecipeDeployParams) (RecipeDeployStarted, error) {
 	if s.Mode == "isolated" {
-		return RecipeDeployResult{}, fail("sync_disabled", "Deploys sync first, which is disabled for the isolated development vault.", "Use a dedicated test server to try deploys.", false)
+		return RecipeDeployStarted{}, fail("sync_disabled", "Deploys sync first, which is disabled for the isolated development vault.", "Use a dedicated test server to try deploys.", false)
 	}
 	if p.ScopeID == "" || p.Name == "" {
-		return RecipeDeployResult{}, fail("validation", "Choose a recipe to deploy.", "", false)
+		return RecipeDeployStarted{}, fail("validation", "Choose a recipe to deploy.", "", false)
 	}
-	var mu sync.Mutex
-	out := RecipeDeployResult{Results: []recipe.Result{}}
-	err := cli.RunServiceDeploy(ctx, cli.DeployOpts{
-		Scope: p.ScopeID, Name: p.Name, Target: p.Target,
-		Env: []string{"PATH=" + userShellPath()},
-		OnResult: func(r recipe.Result) {
-			mu.Lock()
-			out.Results = append(out.Results, r)
-			mu.Unlock()
-		},
-	})
-	if err != nil {
-		if len(out.Results) == 0 {
-			return RecipeDeployResult{}, mapDomainError(err)
+	job := &deployJob{results: []recipe.Result{}}
+	deployJobsMu.Lock()
+	deployJobSeq++
+	id := "deploy-" + strconv.Itoa(deployJobSeq)
+	deployJobs[id] = job
+	deployJobsMu.Unlock()
+	go func() {
+		// Not the request context: the deploy outlives this request.
+		err := cli.RunServiceDeploy(context.Background(), cli.DeployOpts{
+			Scope: p.ScopeID, Name: p.Name, Target: p.Target,
+			Env: []string{"PATH=" + userShellPath()},
+			OnResult: func(r recipe.Result) {
+				job.mu.Lock()
+				job.results = append(job.results, r)
+				job.mu.Unlock()
+			},
+		})
+		job.mu.Lock()
+		if err != nil {
+			job.err = err.Error()
 		}
-		out.Error = err.Error()
+		job.done = true
+		job.mu.Unlock()
+	}()
+	return RecipeDeployStarted{JobID: id}, nil
+}
+
+func (s *Service) recipeDeployStatus(p RecipeDeployStarted) (RecipeDeployStatus, error) {
+	deployJobsMu.Lock()
+	job, ok := deployJobs[p.JobID]
+	deployJobsMu.Unlock()
+	if !ok {
+		return RecipeDeployStatus{}, fail("not_found", "That deploy is no longer known.", "", false)
+	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	out := RecipeDeployStatus{Done: job.done, Results: append([]recipe.Result(nil), job.results...), Error: job.err}
+	if job.done {
+		deployJobsMu.Lock()
+		delete(deployJobs, p.JobID)
+		deployJobsMu.Unlock()
 	}
 	return out, nil
 }
@@ -140,16 +191,35 @@ func userShellPath() string {
 		const marker = "__FD0_PATH__="
 		cmd := exec.CommandContext(ctx, shell, "-l", "-c", `printf '\n`+marker+`%s\n' "$PATH"`)
 		cmd.Stdin = nil
-		var stdout bytes.Buffer
-		cmd.Stdout = &stdout
+		// A startup script may print a lot or leave a child holding stdout:
+		// cap the capture and stop waiting shortly after the shell exits.
+		stdout := &cappedBuffer{limit: 64 << 10}
+		cmd.Stdout = stdout
+		cmd.WaitDelay = time.Second
 		if cmd.Run() != nil {
 			return
 		}
-		for _, line := range strings.Split(stdout.String(), "\n") {
+		for _, line := range strings.Split(stdout.buf.String(), "\n") {
 			if value, ok := strings.CutPrefix(line, marker); ok && value != "" {
 				shellPath = value
 			}
 		}
 	})
 	return shellPath
+}
+
+type cappedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if room := c.limit - c.buf.Len(); room > 0 {
+		if len(p) > room {
+			c.buf.Write(p[:room])
+		} else {
+			c.buf.Write(p)
+		}
+	}
+	return len(p), nil
 }

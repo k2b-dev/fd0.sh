@@ -90,6 +90,8 @@ import type {
   SSHGrantInput,
   RecipeApproveInput,
   RecipeDeployInput,
+  RecipeDeployResult,
+  RecipeView,
   SSHGrantResult,
   UpdateStatus,
   VaultStatus,
@@ -1439,9 +1441,39 @@ function registerIPC(client: BridgeSupervisor): void {
     passphrase.fill(0); pin.fill(0);
     return client.request("recipe.approve", params, 120_000);
   });
-  // A deploy runs the recipe's commands and can take minutes (rollouts).
-  handle("fd0:recipe-deploy", (input: RecipeDeployInput) =>
-    client.request("recipe.deploy", { scopeId: String(input?.scopeId ?? ""), name: String(input?.name ?? ""), target: String(input?.target ?? "") }, 30 * 60_000));
+  // The confirmation lives here, built from bridge data, so renderer code
+  // cannot run a recipe without the user seeing what will run.
+  handle("fd0:recipe-deploy", async (input: RecipeDeployInput) => {
+    if (!mainWindow) throw new Error("fd0 window is unavailable");
+    const scopeId = String(input?.scopeId ?? "");
+    const name = String(input?.name ?? "");
+    const target = String(input?.target ?? "");
+    const service = name.split("/")[0];
+    const listed = await client.request<{ recipes: RecipeView[] }>("recipe.list", { scopeId, service });
+    const recipes = name.includes("/") ? listed.recipes.filter((r) => r.name === name) : listed.recipes;
+    if (recipes.length === 0) throw new Error("That recipe is no longer available");
+    if (target && !(recipes.length === 1 && recipes[0]?.targets?.includes(target))) throw new Error("That target is no longer part of the recipe");
+    const lines = recipes.map((r) => `• ${r.name}: ${target || (r.targets?.length ? r.targets.join(", ") : "single run")}`);
+    const answer = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      buttons: ["Cancel", "Deploy"],
+      defaultId: 0,
+      cancelId: 0,
+      title: "Deploy now?",
+      message: `Deploy ${dialogText(target ? `${name} to ${target}` : name, "this recipe")}?`,
+      detail: `fd0 syncs, then runs these approved recipes on this device as your user, with the selected values, and stops at the first failure:\n\n${lines.join("\n")}`,
+      noLink: true,
+    });
+    if (answer.response !== 1) return { cancelled: true, results: [] };
+    const started = await client.request<{ jobId: string }>("recipe.deploy", { scopeId, name, target });
+    // Poll the job: a deploy can take minutes, and the bridge keeps serving
+    // other requests meanwhile.
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const state = await client.request<RecipeDeployResult & { done: boolean }>("recipe.deployStatus", { jobId: started.jobId });
+      if (state.done) return { results: state.results, error: state.error };
+    }
+  });
   handle("fd0:lock", async (all?: boolean) => {
     const status = observeVaultStatus(await client.request<VaultStatus>("vault.lock", { all: all === true }));
     closeLargeTypeWindow();

@@ -44,17 +44,16 @@ test("the command is always visible with targets and results", () => withPage(""
   expect(await page.getByRole("button", { name: "Approve…" }).count()).toBe(0);
 }));
 
-test("deploy runs only after confirmation, for the whole recipe or one target", () => withPage("", async (page) => {
+test("deploy asks main (native confirmation) and shows returned results at once", () => withPage("", async (page) => {
   await page.getByRole("button", { name: "Deploy", exact: true }).first().click();
-  await page.getByRole("dialog", { name: "Deploy now?" }).waitFor();
-  expect(await page.evaluate(() => window.recipeCalls)).toEqual([]);
-  await page.getByRole("dialog").getByRole("button", { name: "Deploy", exact: true }).click();
-  await page.getByRole("dialog").waitFor({ state: "detached" });
+  await page.getByText("reader-laptop").waitFor();
   await page.getByRole("row", { name: /rsql-docs/ }).hover();
   await page.getByRole("button", { name: "Deploy docs/k8s-1 to rsql-docs" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Deploy", exact: true }).click();
-  await page.getByRole("dialog").waitFor({ state: "detached" });
+  await page.waitForFunction(() => window.recipeCalls.length === 2);
   expect(await page.evaluate(() => window.recipeCalls)).toEqual(["deploy:docs/k8s-1:", "deploy:docs/k8s-1:rsql-docs"]);
+  // Every argument is listed in order.
+  expect(await page.getByText("[0]").isVisible()).toBe(true);
+  expect(await page.getByText("[2]").isVisible()).toBe(true);
 }));
 
 test("an unapproved recipe shows the full command before approval", () => withPage("?approved=0", async (page) => {

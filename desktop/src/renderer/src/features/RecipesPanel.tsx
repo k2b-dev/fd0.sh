@@ -1,5 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import type { RecipeResult, RecipeView, UnlockInput, VaultStatus } from "../../../shared/contracts";
+import { useVault } from "../lib/store";
 import { toAppError } from "../lib/errors";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
@@ -27,35 +28,46 @@ function when(at: string): string {
   return date.toDateString() === today.toDateString() ? `${time} today` : `${date.toLocaleDateString()} ${time}`;
 }
 
-/** The newest result per target, from any device. */
-function latestByTarget(results: RecipeResult[]): Map<string, RecipeResult> {
-  const latest = new Map<string, RecipeResult>();
+/** Results per target, newest first, one line per device. */
+function resultsByTarget(results: RecipeResult[]): Map<string, RecipeResult[]> {
+  const byTarget = new Map<string, Map<string, RecipeResult>>();
   for (const r of results) {
-    const current = latest.get(r.target);
-    if (!current || r.at > current.at) latest.set(r.target, r);
+    const devices = byTarget.get(r.target) ?? new Map<string, RecipeResult>();
+    const current = devices.get(r.device);
+    if (!current || r.at > current.at) devices.set(r.device, r);
+    byTarget.set(r.target, devices);
   }
-  return latest;
+  const out = new Map<string, RecipeResult[]>();
+  for (const [target, devices] of byTarget) out.set(target, [...devices.values()].sort((a, b) => b.at.localeCompare(a.at)));
+  return out;
 }
 
-/** argv as a program line plus script blocks for multi-line arguments. */
+/** Every argument in order: short ones on one line each, scripts as numbered blocks. */
 function CommandBlock(props: { command: string[] }): JSX.Element {
-  const head = () => props.command.filter((arg) => !arg.includes("\n")).join(" ");
-  const scripts = () => props.command.filter((arg) => arg.includes("\n"));
-  return <div class="recipe-command">
-    <div class="recipe-command-head"><span>Command</span><code>{head()}</code></div>
-    <For each={scripts()}>{(script) => <pre class="recipe-code">
-      <For each={script.replace(/\n$/, "").split("\n")}>{(line) => <span>{line}</span>}</For>
-    </pre>}</For>
+  return <div class="recipe-command" aria-label="Command">
+    <div class="recipe-command-head"><span>Command</span><span>{props.command.length} argument{props.command.length === 1 ? "" : "s"}</span></div>
+    <For each={props.command}>{(arg, i) => <div class="recipe-arg">
+      <span class="recipe-arg-index">[{i()}]</span>
+      <Show when={arg.includes("\n")} fallback={<code class="recipe-arg-inline">{arg === "" ? "(empty)" : arg}</code>}>
+        <pre class="recipe-code">
+          <For each={arg.split("\n")}>{(line) => <span>{line}</span>}</For>
+        </pre>
+      </Show>
+    </div>}</For>
   </div>;
 }
 
 export function RecipesPanel(props: { scopeId: string; service: string; status: VaultStatus | null }): JSX.Element {
+  const vault = useVault();
   const [recipes, setRecipes] = createSignal<RecipeView[]>([]);
   const [loaded, setLoaded] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [runError, setRunError] = createSignal("");
+  // Results returned by a deploy on this device, shown even when they could
+  // not be published (readers) until the next list includes them.
+  const [local, setLocal] = createSignal<RecipeResult[]>([]);
   const [busy, setBusy] = createSignal("");
   const [reviewing, setReviewing] = createSignal<RecipeView>();
-  const [confirming, setConfirming] = createSignal<{ name: string; target?: string; label: string }>();
   let alive = true;
   let revision = 0;
   onCleanup(() => { alive = false; revision++; });
@@ -71,7 +83,9 @@ export function RecipesPanel(props: { scopeId: string; service: string; status: 
       if (alive && current === revision) setLoaded(true);
     }
   }
-  createEffect(() => { props.scopeId; props.service; setLoaded(false); void refresh(); });
+  createEffect(() => { props.scopeId; props.service; setLoaded(false); setLocal([]); setRunError(""); void refresh(); });
+  // Reload when the app refreshes its inventory, for example after a sync.
+  createEffect(() => { vault.inventory(); void refresh(); });
 
   const allApproved = createMemo(() => recipes().length > 0 && recipes().every((r) => r.approval === "approved on this device"));
 
@@ -85,14 +99,16 @@ export function RecipesPanel(props: { scopeId: string; service: string; status: 
   }
 
   async function deploy(name: string, target?: string): Promise<void> {
-    setConfirming(undefined);
     setBusy(target ? `${name}\u0000${target}` : name);
-    setError("");
+    setRunError("");
     try {
+      // Electron main asks for confirmation with the bridge's own data.
       const result = await window.fd0.recipeDeploy({ scopeId: props.scopeId, name, target });
-      if (alive && result.error) setError(result.error);
+      if (!alive || result.cancelled) return;
+      setLocal((prev) => [...prev, ...result.results]);
+      if (result.error) setRunError(result.error);
     } catch (cause) {
-      if (alive) setError(errorText(cause));
+      if (alive) setRunError(errorText(cause));
     } finally {
       if (alive) { setBusy(""); await refresh(); }
     }
@@ -104,7 +120,7 @@ export function RecipesPanel(props: { scopeId: string; service: string; status: 
         <h2 class="section-heading">Deploys</h2>
         <Show when={recipes().length > 1}>
           <Button size="sm" disabled={!allApproved() || busy() !== ""}
-            onClick={() => setConfirming({ name: props.service, label: `all ${recipes().length} recipes of ${props.service}` })}>
+            onClick={() => void deploy(props.service)}>
             Deploy all
           </Button>
         </Show>
@@ -112,7 +128,7 @@ export function RecipesPanel(props: { scopeId: string; service: string; status: 
       <For each={recipes()}>{(r) => {
         const approved = () => r.approval === "approved on this device";
         const targets = () => (r.targets?.length ? r.targets : [""]);
-        const latest = () => latestByTarget(r.results);
+        const latest = () => resultsByTarget([...r.results, ...local().filter((x) => x.recipe === r.name)]);
         const running = (target?: string) => busy() === r.name || busy() === r.service || (target !== undefined && busy() === `${r.name}\u0000${target}`);
         return <article class="recipe-card" aria-label={`Recipe ${r.name}`}>
           <header class="recipe-card-head">
@@ -121,8 +137,7 @@ export function RecipesPanel(props: { scopeId: string; service: string; status: 
               <Show when={r.description}><small>{r.description}</small></Show>
             </div>
             <Show when={approved()} fallback={<Button size="sm" onClick={() => setReviewing(r)}>Approve…</Button>}>
-              <Button size="sm" disabled={busy() !== ""}
-                onClick={() => setConfirming({ name: r.name, label: `${r.name} to ${targets().filter(Boolean).length || 1} target${targets().length === 1 ? "" : "s"}` })}>
+              <Button size="sm" disabled={busy() !== ""} onClick={() => void deploy(r.name)}>
                 {running() ? "Deploying…" : "Deploy"}
               </Button>
             </Show>
@@ -134,23 +149,23 @@ export function RecipesPanel(props: { scopeId: string; service: string; status: 
           <table class="recipe-targets">
             <tbody>
               <For each={targets()}>{(t) => {
-                const result = () => latest().get(t);
+                const lines = () => latest().get(t) ?? [];
                 return <tr>
                   <th scope="row">{t || "Single run"}</th>
                   <td>
                     <Show when={!running(t)} fallback={<span>Running…</span>}>
-                      <Show when={result()} fallback={<span class="recipe-muted">Not deployed yet</span>}>
-                        {(res) => <>
-                          <Show when={res().status !== "ok"}><span class="recipe-failed">Failed · exit {res().exitCode}</span><span class="recipe-muted"> · </span></Show>
-                          <span class="recipe-muted">{when(res().at)} · {res().host}</span>
-                        </>}
+                      <Show when={lines().length > 0} fallback={<span class="recipe-muted">Not deployed yet</span>}>
+                        <For each={lines()}>{(res) => <div>
+                          <Show when={res.status !== "ok"}><span class="recipe-failed">Failed · exit {res.exitCode}</span><span class="recipe-muted"> · </span></Show>
+                          <span class="recipe-muted">{when(res.at)} · {res.host || "this device"}</span>
+                        </div>}</For>
                       </Show>
                     </Show>
                   </td>
                   <td class="recipe-target-action">
                     <Show when={approved() && t}>
                       <Button size="sm" variant="quiet" disabled={busy() !== ""} aria-label={`Deploy ${r.name} to ${t}`}
-                        onClick={() => setConfirming({ name: r.name, target: t, label: `${r.name} to ${t}` })}>Deploy</Button>
+                        onClick={() => void deploy(r.name, t)}>Deploy</Button>
                     </Show>
                   </td>
                 </tr>;
@@ -160,13 +175,8 @@ export function RecipesPanel(props: { scopeId: string; service: string; status: 
           <CommandBlock command={r.command} />
         </article>;
       }}</For>
+      <Show when={runError()}><p role="alert" class="recipe-error">{runError()}</p></Show>
       <Show when={error()}><p role="alert" class="recipe-error">{error()}</p></Show>
-
-      <Show when={confirming()}>{(c) => <Modal size="small" title="Deploy now?" description={`fd0 syncs, then runs ${c().label} on this device. It stops at the first failure.`}
-        onClose={() => setConfirming(undefined)}
-        footer={<><Button variant="quiet" onClick={() => setConfirming(undefined)}>Cancel</Button><Button variant="primary" onClick={() => void deploy(c().name, c().target)}>Deploy</Button></>}>
-        <p class="recipe-muted">The commands run as your user with the selected values. Their output stays hidden because it can contain values.</p>
-      </Modal>}</Show>
 
       <Show when={reviewing()}>{(r) => <Modal size="wide" title={`Approve ${r().name}`} description={`${r().scope}`} onClose={() => setReviewing(undefined)}>
         <dl class="recipe-review">

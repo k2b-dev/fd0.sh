@@ -439,6 +439,12 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, err
 		}
 		return s.recipeDeploy(ctx, params)
+	case "recipe.deployStatus":
+		var params RecipeDeployStarted
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.recipeDeployStatus(params)
 	case "item.detail":
 		var params RecordRef
 		if err := decodeParams(raw, &params); err != nil {

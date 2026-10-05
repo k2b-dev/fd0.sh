@@ -691,6 +691,7 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 			}
 			code, err := runRecipeCommand(ctx, run, target, home, o.Verbose, o.Env)
 			res := recipe.Result{Recipe: run.entry.Name, Target: target, Digest: run.entry.Digest, Source: run.source,
+				Device: recorder.device, Host: recorder.host,
 				Status: "ok", ExitCode: code, At: recipe.Now().Format("2006-01-02T15:04:05Z")}
 			if err != nil {
 				res.Status = "failed"
