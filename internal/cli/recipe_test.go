@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -277,5 +278,27 @@ func TestRecipeReviewGuards(t *testing.T) {
 	}
 	if err := RunServiceRename(ctx, scope, "app", "app-2", false); err == nil {
 		t.Fatal("rename ignored an unusable recipe")
+	}
+}
+
+func TestPrintRecipeDefinitionShowsScriptLines(t *testing.T) {
+	r := &recipe.Recipe{Version: recipe.Version, Service: "s", Input: recipe.InputFile,
+		Fields:  []recipe.Mapping{{Field: "f"}},
+		Command: []string{"/bin/sh", "-c", "set -eu\nkubectl apply -f -\n\x1b[2Jdone"}}
+	read, write, _ := os.Pipe()
+	saved := os.Stdout
+	os.Stdout = write
+	printRecipeDefinition(r)
+	os.Stdout = saved
+	write.Close()
+	out, _ := io.ReadAll(read)
+	text := string(out)
+	for _, want := range []string{"[0] /bin/sh", "[1] -c", "| set -eu", "| kubectl apply -f -"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "\x1b") {
+		t.Fatal("control sequence printed")
 	}
 }

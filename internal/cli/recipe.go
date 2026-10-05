@@ -371,7 +371,28 @@ func printRecipeDefinition(r *recipe.Recipe) {
 	if r.Dir != "" {
 		fmt.Printf("  dir:     %s\n", terminalSafe(r.Dir))
 	}
-	fmt.Printf("  command: %s\n", terminalSafe(strings.Join(quoted, " ")))
+	multiline := false
+	for _, arg := range r.Command {
+		multiline = multiline || strings.Contains(arg, "\n")
+	}
+	if !multiline {
+		fmt.Printf("  command: %s\n", terminalSafe(strings.Join(quoted, " ")))
+		return
+	}
+	// One argument per line, so a script passed to sh -c is readable before
+	// it is approved; each line is still made terminal-safe.
+	fmt.Println("  command:")
+	for i, arg := range r.Command {
+		fmt.Printf("    [%d]", i)
+		if !strings.Contains(arg, "\n") {
+			fmt.Printf(" %s\n", terminalSafe(shellQuote(arg)))
+			continue
+		}
+		fmt.Println()
+		for _, line := range strings.Split(strings.TrimRight(arg, "\n"), "\n") {
+			fmt.Printf("      | %s\n", terminalSafe(line))
+		}
+	}
 }
 
 func shellQuote(a string) string {
