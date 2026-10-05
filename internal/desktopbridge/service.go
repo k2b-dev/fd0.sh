@@ -258,7 +258,7 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 				"config-import", "item-tags", "item-move", "item-rename", "item-remove", "scope-create",
 				"scope-rename", "scope-leave", "scope-share", "scope-members", "identity-cards",
 				"recovery-export", "recovery-import", "auth-default", "agent-prepare-update",
-				"agent-restart", "structured-sync",
+				"agent-restart", "structured-sync", "recipes",
 			},
 		}, nil
 	case "vault.status":
@@ -413,6 +413,24 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, fail("validation", "That setup link is not a valid TOTP account.", err.Error(), false)
 		}
 		return value, nil
+	case "recipe.list":
+		var params RecipeListParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.recipeList(ctx, params)
+	case "recipe.approve":
+		var params RecipeApproveParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.recipeApprove(ctx, params)
+	case "recipe.deploy":
+		var params RecipeDeployParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return s.recipeDeploy(ctx, params)
 	case "item.detail":
 		var params RecordRef
 		if err := decodeParams(raw, &params); err != nil {

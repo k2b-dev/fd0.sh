@@ -23,3 +23,15 @@ func TestIsolatedModeRefusesRoleAssignments(t *testing.T) {
 		}
 	}
 }
+
+// Deploys sync first, so the isolated development vault refuses them before
+// any command or network call.
+func TestIsolatedModeRefusesRecipeDeploys(t *testing.T) {
+	t.Setenv("FD0_HOME", t.TempDir())
+	service := &Service{Mode: "isolated"}
+	_, err := service.Handle(context.Background(), "recipe.deploy", json.RawMessage(`{"scopeId":"s","name":"svc/x"}`))
+	var me *methodError
+	if !errors.As(err, &me) || me.bridge.Code != "sync_disabled" {
+		t.Fatalf("got %v, want sync_disabled", err)
+	}
+}

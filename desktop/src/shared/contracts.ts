@@ -48,6 +48,21 @@ export type AuthMethodSummary = {
   default?: boolean;
 };
 
+export type RecipeMapping = { field: string; as?: string };
+export type RecipeResult = {
+  recipe: string; target: string; device: string; host: string; digest: string; source: string;
+  status: "ok" | "failed"; exitCode: number; at: string;
+};
+/** A deploy recipe as the bridge shows it: definition, approval here, latest results. Never values. */
+export type RecipeView = {
+  name: string; scope: string; scopeId: string; service: string; command: string[]; dir?: string;
+  fields: RecipeMapping[]; input: string; targets?: string[]; description?: string; digest: string;
+  approval: string; results: RecipeResult[];
+};
+export type RecipeApproveInput = UnlockInput & { scopeId: string; name: string; digest: string };
+export type RecipeDeployInput = { scopeId: string; name: string; target?: string };
+export type RecipeDeployResult = { results: RecipeResult[]; error?: string };
+
 export type UnlockInput = {
   method?: string;
   passphrase?: string;
@@ -514,6 +529,9 @@ export type DesktopAPI = {
   unlock(input: UnlockInput): Promise<VaultStatus>;
   lock(all?: boolean): Promise<VaultStatus>;
  sshGrant(input: SSHGrantInput): Promise<SSHGrantResult>;
+  recipeList(scopeId: string, service: string): Promise<{ recipes: RecipeView[] }>;
+  recipeApprove(input: RecipeApproveInput): Promise<{ recipes: RecipeView[] }>;
+  recipeDeploy(input: RecipeDeployInput): Promise<RecipeDeployResult>;
   restartAgent(): Promise<VaultStatus>;
   selectRecoveryFile(): Promise<{ version: 1 | 2 } | null>;
   restoreVault(recoveryPassphrase: string, newPassphrase?: string): Promise<VaultStatus | null>;

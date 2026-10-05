@@ -26,6 +26,7 @@ import { ItemTagEditor } from "./ItemTagEditor";
 import { Button, IconButton } from "../ui/Button";
 import { MenuButton, type MenuSection } from "../ui/Menu";
 import { SSHGrantPanel } from "./SSHGrantPanel";
+import { RecipesPanel } from "./RecipesPanel";
 import { ItemHistory } from "./ItemHistory";
 
 const REVEAL_SECONDS = 15;
@@ -395,6 +396,9 @@ function DetailContent(props: {
  <Show when={item().badge === "SSH HOST" && !props.raw && vault.status()?.sshGrantsSupported}>
  <SSHGrantPanel item={{scopeId:item().scopeId,name:item().recordName}} />
  </Show>
+          <Show when={item().badge === "SERVICE" && !props.raw && item().recordName.startsWith("service:")}>
+            <RecipesPanel scopeId={item().scopeId} service={item().recordName.slice("service:".length)} status={vault.status()} />
+          </Show>
           <For each={sections()}>
             {([section, fields]) => (
               <section class="field-section">

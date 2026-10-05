@@ -88,6 +88,8 @@ import type {
   TerminalTheme,
   UnlockInput,
   SSHGrantInput,
+  RecipeApproveInput,
+  RecipeDeployInput,
   SSHGrantResult,
   UpdateStatus,
   VaultStatus,
@@ -1424,6 +1426,21 @@ function registerIPC(client: BridgeSupervisor): void {
     if (input.action === "create" || input.action === "revoke") sendCommand("refresh");
     return result;
   });
+  handle("fd0:recipe-list", (scopeId: string, service: string) =>
+    client.request("recipe.list", { scopeId: String(scopeId), service: String(service) }));
+  handle("fd0:recipe-approve", async (input: RecipeApproveInput) => {
+    const passphrase = Buffer.from(input?.passphrase ?? "", "utf8");
+    const pin = Buffer.from(input?.pin ?? "", "utf8");
+    const params = {
+      scopeId: String(input?.scopeId ?? ""), name: String(input?.name ?? ""), digest: String(input?.digest ?? ""),
+      method: input?.method ?? "", passphrase: passphrase.toString("base64"), pin: pin.toString("base64"),
+    };
+    passphrase.fill(0); pin.fill(0);
+    return client.request("recipe.approve", params, 120_000);
+  });
+  // A deploy runs the recipe's commands and can take minutes (rollouts).
+  handle("fd0:recipe-deploy", (input: RecipeDeployInput) =>
+    client.request("recipe.deploy", { scopeId: String(input?.scopeId ?? ""), name: String(input?.name ?? ""), target: String(input?.target ?? "") }, 30 * 60_000));
   handle("fd0:lock", async (all?: boolean) => {
     const status = observeVaultStatus(await client.request<VaultStatus>("vault.lock", { all: all === true }));
     closeLargeTypeWindow();
