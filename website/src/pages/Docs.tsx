@@ -933,6 +933,27 @@ $ fd0 scope members deploy`}</Box>
       update every device in the scope first.
     </Note>
 
+    <H2 id="grants">Values readable while locked</H2>
+    <P>
+      A grant keeps one value readable on this device while fd0 is locked,
+      for a job or tool that runs as you and needs exactly that value. You
+      create it in a terminal and authenticate again; it lasts 30 days unless
+      you choose another --ttl, at most 365 days.
+    </P>
+    <Box>{`$ fd0 secret grant cld-client-secret --scope private-pass
+$ fd0 pass grant mail password --scope work
+$ fd0 service grant app token --scope ops
+
+# while locked, with the exact name and --scope
+$ fd0 secret get cld-client-secret --raw --scope private-pass`}</Box>
+    <Cmd signature="fd0 secret grants" body="List this device's grants for secrets, pass and service fields, with vault and expiry. Never shows values." />
+    <Cmd signature="fd0 secret revoke <id>" body="Remove a grant. fd0 lock --all stops all grants until the next unlock." />
+    <Note>
+      While a grant is active, every program running as your user can read
+      that value. Renaming or deleting the value, or removing the field,
+      removes the grant; a new value with the same name needs a new grant.
+    </Note>
+
     <H2>Unlock methods</H2>
     <P>
       Auth methods are stored in the vault. The default unlock method is a
