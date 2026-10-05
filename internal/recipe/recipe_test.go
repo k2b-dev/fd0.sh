@@ -116,20 +116,20 @@ func TestPrepareRendersEachInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(p.Stdin); got != "PGPASSWORD=\"s3cret pw\"\nREGION=\"eu\"\n" || p.Env != nil {
+	if got := string(p.Data); got != "PGPASSWORD=\"s3cret pw\"\nREGION=\"eu\"\n" || p.Env != nil {
 		t.Fatalf("systemd-env: %q %v", got, p.Env)
 	}
 	r.Input = InputEnv
-	if p, err = r.Prepare(svc); err != nil || p.Stdin != nil || strings.Join(p.Env, "|") != "PGPASSWORD=s3cret pw|REGION=eu" {
+	if p, err = r.Prepare(svc); err != nil || p.Data != nil || p.Channel != ChannelEnv || strings.Join(p.Env, "|") != "PGPASSWORD=s3cret pw|REGION=eu" {
 		t.Fatalf("env: %+v %v", p, err)
 	}
 	r.Input, r.Fields = InputFile, []Mapping{{Field: "ca.crt"}}
-	if p, err = r.Prepare(svc); err != nil || string(p.Stdin) != "-----BEGIN-----\n" {
+	if p, err = r.Prepare(svc); err != nil || string(p.Data) != "-----BEGIN-----\n" {
 		t.Fatalf("file: %+v %v", p, err)
 	}
 	r.Input, r.Fields = "stdin:k8s-secret:app/pg", []Mapping{{Field: "db-password", As: "DATABASE_PASSWORD"}}
-	if p, err = r.Prepare(svc); err != nil || !strings.Contains(string(p.Stdin), "DATABASE_PASSWORD:") || !strings.Contains(string(p.Stdin), "namespace: app") {
-		t.Fatalf("k8s: %s %v", p.Stdin, err)
+	if p, err = r.Prepare(svc); err != nil || !strings.Contains(string(p.Data), "DATABASE_PASSWORD:") || !strings.Contains(string(p.Data), "namespace: app") {
+		t.Fatalf("k8s: %s %v", p.Data, err)
 	}
 	r.Input, r.Fields = InputEnv, []Mapping{{Field: "missing", As: "X"}}
 	if _, err := r.Prepare(svc); err == nil {
@@ -197,5 +197,28 @@ func TestResultConsistencyChecksStatusAndTime(t *testing.T) {
 		if r.Consistent("a/b/-/d") {
 			t.Fatalf("%s accepted", name)
 		}
+	}
+}
+
+func TestFD3InputUsesSameFormats(t *testing.T) {
+	svc := testService(t)
+	r := valid()
+	r.Input = "fd3:systemd-env"
+	if err := r.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	p, err := r.Prepare(svc)
+	if err != nil || p.Channel != ChannelFD3 || string(p.Data) != "DB_PASSWORD=\"s3cret pw\"\n" {
+		t.Fatalf("fd3: %+v %v", p, err)
+	}
+	for _, bad := range []string{"fd3:", "fd3:env", "stdin:env", "fd4:sh", "pipe:file"} {
+		r.Input = bad
+		if err := r.Validate(); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	r.Input, r.Fields = "fd3:k8s-secret:app/pg", []Mapping{{Field: "db-password"}}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("fd3 k8s: %v", err)
 	}
 }

@@ -581,6 +581,7 @@ type DeployOpts struct {
 	Name    string // SERVICE or SERVICE/NAME
 	Target  string // one target of the selected recipe
 	Verbose bool
+	DryRun  bool // show what would run; run nothing, record nothing
 }
 
 // deploySync is replaced in tests that run without a server.
@@ -591,6 +592,7 @@ type deployRun struct {
 	targets  []string
 	prepared *recipe.Prepared
 	source   string
+	approval string
 }
 
 // RunServiceDeploy syncs, freezes the selected service values, releases the
@@ -608,6 +610,9 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 	}
 	if o.Target != "" && recipeName == "" {
 		return errors.New("--target needs one recipe: fd0 service deploy SERVICE/NAME --target T")
+	}
+	if o.DryRun {
+		return dryRunDeploy(ctx, o, serviceName, recipeName)
 	}
 	unlock, err := lockDeploys()
 	if err != nil {
@@ -664,6 +669,55 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 	}
 	recorder.share()
 	return failure
+}
+
+// dryRunDeploy syncs and prints what a deploy would run, per recipe and
+// target, without running or recording anything. It never prints values.
+func dryRunDeploy(ctx context.Context, o DeployOpts, serviceName, recipeName string) error {
+	stderrln("↻ syncing before dry run")
+	if err := deploySync(ctx); err != nil {
+		return fmt.Errorf("deploy: sync failed: %w", err)
+	}
+	runs, scopeID, err := prepareDeploy(ctx, o, serviceName, recipeName)
+	if err != nil {
+		return err
+	}
+	s, err := Open(ctx)
+	if err != nil {
+		return err
+	}
+	results := map[string][]recipe.Result{}
+	for _, run := range runs {
+		results[run.entry.Name], _ = loadResults(s, scopeID, run.entry.Name)
+	}
+	s.Close()
+	fmt.Println("Dry run: nothing is executed or recorded.")
+	for _, run := range runs {
+		fmt.Printf("\n%s   %s\n", terminalSafe(run.entry.Name), run.approval)
+		printRecipeDefinition(run.entry.Recipe)
+		size := len(run.prepared.Data)
+		for _, kv := range run.prepared.Env {
+			size += len(kv)
+		}
+		fmt.Printf("  would deliver %d bytes via %s from service event %s\n", size, run.prepared.Channel, shortEvent(run.source))
+		for _, t := range run.targets {
+			if t == "" {
+				t = "(single run)"
+			}
+			fmt.Printf("  would run: %s\n", terminalSafe(t))
+		}
+		if len(results[run.entry.Name]) == 0 && len(run.targets) > 1 && o.Target == "" {
+			fmt.Printf("  never deployed: try one target first, e.g. fd0 service deploy %s --target %s\n", terminalSafe(run.entry.Name), terminalSafe(run.targets[0]))
+		}
+	}
+	return nil
+}
+
+func shortEvent(id string) string {
+	if len(id) > 12 {
+		return id[:12] + "…"
+	}
+	return id
 }
 
 // lockDeploys allows one deploy at a time on this device, so an older run
@@ -734,7 +788,8 @@ func prepareDeploy(ctx context.Context, o DeployOpts, serviceName, recipeName st
 		if recipeName != "" && e.Name != recipeName {
 			continue
 		}
-		if state := approvalState(e, approved); state != "approved on this device" {
+		state := approvalState(e, approved)
+		if state != "approved on this device" && !o.DryRun {
 			return nil, "", fmt.Errorf("deploy: recipe %s is %s; review it with: fd0 recipe approve %s", e.Name, state, e.Name)
 		}
 		prepared, err := e.Recipe.Prepare(svc)
@@ -755,7 +810,7 @@ func prepareDeploy(ctx context.Context, o DeployOpts, serviceName, recipeName st
 			}
 			targets = []string{o.Target}
 		}
-		runs = append(runs, deployRun{entry: e, targets: targets, prepared: prepared, source: svcRec.Revision})
+		runs = append(runs, deployRun{entry: e, targets: targets, prepared: prepared, source: svcRec.Revision, approval: state})
 	}
 	if len(runs) == 0 {
 		if recipeName != "" {
@@ -782,7 +837,7 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	// caller's environment nor a value can redirect a command.
 	base := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "FD0_TARGET=") && !strings.HasPrefix(kv, "FD0_SERVICE=") && !strings.HasPrefix(kv, "FD0_RECIPE=") {
+		if !strings.HasPrefix(kv, "FD0_TARGET=") && !strings.HasPrefix(kv, "FD0_SERVICE=") && !strings.HasPrefix(kv, "FD0_RECIPE=") && !strings.HasPrefix(kv, "FD0_INPUT=") {
 			base = append(base, kv)
 		}
 	}
@@ -790,9 +845,29 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	if target != "" {
 		meta = append(meta, "FD0_TARGET="+target)
 	}
+	if run.prepared.Channel == recipe.ChannelFD3 {
+		meta = append(meta, "FD0_INPUT=/dev/fd/3")
+	}
 	cmd.Env = mergeEnv(mergeEnv(base, run.prepared.Env), meta)
-	if run.prepared.Stdin != nil {
-		cmd.Stdin = bytes.NewReader(run.prepared.Stdin)
+	var inputPipe *os.File
+	switch run.prepared.Channel {
+	case recipe.ChannelStdin:
+		cmd.Stdin = bytes.NewReader(run.prepared.Data)
+	case recipe.ChannelFD3:
+		// The value goes to fd 3 and stdin stays /dev/null, so nothing the
+		// script starts first can read it by accident.
+		rd, wr, err := os.Pipe()
+		if err != nil {
+			return -1, fmt.Errorf("command did not run: %v", err)
+		}
+		cmd.ExtraFiles = []*os.File{rd}
+		data := run.prepared.Data
+		go func() {
+			_, _ = wr.Write(data)
+			wr.Close()
+		}()
+		defer rd.Close()
+		inputPipe = rd
 	}
 	// A descendant that keeps stdin open must not hold a finished command.
 	cmd.WaitDelay = 3 * time.Second
@@ -801,7 +876,15 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	if verbose {
 		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	}
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		// Only the child holds fd 3 now: if it exits without reading, the
+		// writer above gets EPIPE instead of blocking.
+		if inputPipe != nil {
+			inputPipe.Close()
+		}
+		err = cmd.Wait()
+	}
 	if err == nil {
 		return 0, nil
 	}

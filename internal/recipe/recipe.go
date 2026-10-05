@@ -34,16 +34,43 @@ const (
 	Version = 1
 )
 
-// Input modes. Values reach a command only through stdin or its environment,
-// never through its arguments.
+// Input modes. Values reach a command through its environment, its stdin, or
+// file descriptor 3 ($FD0_INPUT) — never through its arguments. "fd3:" keeps
+// stdin empty, so programs a script starts first (ssh, tunnels) cannot
+// consume the value; it is the recommended channel.
 const (
 	InputEnv        = "env"
 	InputSystemdEnv = "stdin:systemd-env"
 	InputDockerEnv  = "stdin:docker-env"
 	InputShell      = "stdin:sh"
 	InputFile       = "stdin:file"
-	inputK8sPrefix  = "stdin:k8s-secret:"
+
+	ChannelEnv   = "env"
+	ChannelStdin = "stdin"
+	ChannelFD3   = "fd3"
+
+	formatSystemdEnv = "systemd-env"
+	formatDockerEnv  = "docker-env"
+	formatShell      = "sh"
+	formatFile       = "file"
+	formatK8sPrefix  = "k8s-secret:"
 )
+
+// Channel and format of the recipe's input: ("env", ""), ("stdin", FORMAT)
+// or ("fd3", FORMAT).
+func (r *Recipe) channelFormat() (string, string) {
+	if r.Input == InputEnv {
+		return ChannelEnv, ""
+	}
+	channel, format, _ := strings.Cut(r.Input, ":")
+	return channel, format
+}
+
+// Channel reports how the values reach the command.
+func (r *Recipe) Channel() string {
+	channel, _ := r.channelFormat()
+	return channel
+}
 
 const (
 	maxArgs       = 64
@@ -181,8 +208,17 @@ func (r *Recipe) Validate() error {
 }
 
 func (r *Recipe) validateInput() error {
-	switch r.Input {
-	case InputEnv, InputSystemdEnv, InputDockerEnv, InputShell:
+	channel, format := r.channelFormat()
+	if channel != ChannelEnv && channel != ChannelStdin && channel != ChannelFD3 {
+		return fmt.Errorf("recipe: unknown input %q (env, stdin:FORMAT or fd3:FORMAT)", r.Input)
+	}
+	if channel == ChannelEnv {
+		format = "env"
+	} else if format == "env" || format == "" {
+		return fmt.Errorf("recipe: %s needs a format (systemd-env, docker-env, sh, file, k8s-secret:NS/NAME)", channel)
+	}
+	switch format {
+	case "env", formatSystemdEnv, formatDockerEnv, formatShell:
 		names := map[string]bool{}
 		for _, m := range r.Fields {
 			// Names are stored, never taken from the service at run time, so
@@ -199,15 +235,15 @@ func (r *Recipe) validateInput() error {
 			names[m.As] = true
 		}
 		return nil
-	case InputFile:
+	case formatFile:
 		if len(r.Fields) != 1 || r.Fields[0].As != "" {
-			return errors.New("recipe: stdin:file takes exactly one field and no rename")
+			return errors.New("recipe: the file format takes exactly one field and no rename")
 		}
 		return nil
 	}
 	if ns, name, ok := r.k8sTarget(); ok {
 		if ns == "" || name == "" {
-			return errors.New("recipe: use stdin:k8s-secret:NAMESPACE/SECRET")
+			return errors.New("recipe: use k8s-secret:NAMESPACE/SECRET")
 		}
 		keys := map[string]bool{}
 		for _, m := range r.Fields {
@@ -225,11 +261,12 @@ func (r *Recipe) validateInput() error {
 		}
 		return nil
 	}
-	return fmt.Errorf("recipe: unknown input %q (env, stdin:systemd-env, stdin:docker-env, stdin:sh, stdin:file, stdin:k8s-secret:NS/NAME)", r.Input)
+	return fmt.Errorf("recipe: unknown input format %q (systemd-env, docker-env, sh, file, k8s-secret:NS/NAME)", format)
 }
 
 func (r *Recipe) k8sTarget() (namespace, name string, ok bool) {
-	rest, ok := strings.CutPrefix(r.Input, inputK8sPrefix)
+	_, format := r.channelFormat()
+	rest, ok := strings.CutPrefix(format, formatK8sPrefix)
 	if !ok {
 		return "", "", false
 	}
@@ -278,9 +315,8 @@ func Digest(scopeID, recordName string, r *Recipe, home string) string {
 // ResolveNames fills empty variable names from the service's env names, so a
 // saved recipe always states them explicitly.
 func (r *Recipe) ResolveNames(svc *service.Service) error {
-	switch r.Input {
-	case InputEnv, InputSystemdEnv, InputDockerEnv, InputShell:
-	default:
+	channel, format := r.channelFormat()
+	if channel != ChannelEnv && format != formatSystemdEnv && format != formatDockerEnv && format != formatShell {
 		return nil
 	}
 	for i, m := range r.Fields {
@@ -301,8 +337,9 @@ func (r *Recipe) ResolveNames(svc *service.Service) error {
 
 // Prepared is what one run of a recipe hands to its command.
 type Prepared struct {
-	Stdin []byte   // nil for env input
-	Env   []string // KEY=VALUE entries for env input
+	Channel string   // ChannelEnv, ChannelStdin or ChannelFD3
+	Data    []byte   // rendered input for stdin or fd 3
+	Env     []string // KEY=VALUE entries for env input
 }
 
 // Prepare renders the selected fields of svc for the recipe's input mode.
@@ -315,44 +352,43 @@ func (r *Recipe) Prepare(svc *service.Service) (*Prepared, error) {
 		}
 		fields = append(fields, *f)
 	}
-	switch r.Input {
-	case InputEnv, InputSystemdEnv, InputDockerEnv, InputShell:
+	channel, format := r.channelFormat()
+	if channel == ChannelEnv {
 		for i, m := range r.Fields {
 			fields[i].Env = m.As
 		}
-		if r.Input == InputEnv {
-			env, err := service.ExecEnv(fields)
-			if err != nil {
-				return nil, err
+		env, err := service.ExecEnv(fields)
+		if err != nil {
+			return nil, err
+		}
+		return &Prepared{Channel: channel, Env: env}, nil
+	}
+	var data []byte
+	var err error
+	switch format {
+	case formatSystemdEnv, formatDockerEnv, formatShell:
+		for i, m := range r.Fields {
+			fields[i].Env = m.As
+		}
+		data, err = service.RenderEnv(fields, format)
+	case formatFile:
+		data, err = fields[0].Bytes()
+	default:
+		ns, name, _ := r.k8sTarget()
+		keys := make([]service.SecretKey, 0, len(r.Fields))
+		for _, m := range r.Fields {
+			key := m.As
+			if key == "" {
+				key = m.Field
 			}
-			return &Prepared{Env: env}, nil
+			keys = append(keys, service.SecretKey{Field: m.Field, Key: key})
 		}
-		out, err := service.RenderEnv(fields, strings.TrimPrefix(r.Input, "stdin:"))
-		if err != nil {
-			return nil, err
-		}
-		return &Prepared{Stdin: out}, nil
-	case InputFile:
-		b, err := fields[0].Bytes()
-		if err != nil {
-			return nil, err
-		}
-		return &Prepared{Stdin: b}, nil
+		data, err = service.RenderK8sSecret(svc, r.Service, ns, name, keys)
 	}
-	ns, name, _ := r.k8sTarget()
-	keys := make([]service.SecretKey, 0, len(r.Fields))
-	for _, m := range r.Fields {
-		key := m.As
-		if key == "" {
-			key = m.Field
-		}
-		keys = append(keys, service.SecretKey{Field: m.Field, Key: key})
-	}
-	out, err := service.RenderK8sSecret(svc, r.Service, ns, name, keys)
 	if err != nil {
 		return nil, err
 	}
-	return &Prepared{Stdin: out}, nil
+	return &Prepared{Channel: channel, Data: data}, nil
 }
 
 // Result records one target's last run from one device. Only that device

@@ -302,3 +302,95 @@ func TestPrintRecipeDefinitionShowsScriptLines(t *testing.T) {
 		t.Fatal("control sequence printed")
 	}
 }
+
+// fd 3 input survives a script that consumes stdin first, the failure that
+// wrote an empty Secret in the first real recipe.
+func TestRecipeFD3InputSurvivesStdinConsumers(t *testing.T) {
+	dir := serviceTestEnv(t)
+	ctx, scope := newTestVault(t)
+	saved := deploySync
+	deploySync = func(context.Context) error { return nil }
+	t.Cleanup(func() { deploySync = saved })
+	out := filepath.Join(dir, "fd3-out")
+	t.Setenv("RECIPE_OUT", out)
+	if err := RunServiceAdd(ctx, ServiceAddOpts{Name: "app", Scope: scope}); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	withStdio(t, dir, "fd3-value", func() {
+		err = RunServiceSet(ctx, ServiceSetOpts{Name: "app", Scope: scope, Field: "token", Type: "file"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := RecipeOpts{Name: "app/fd3", Scope: scope, Fields: []string{"token"}, Input: "fd3:file",
+		Command: []string{"/bin/sh", "-c", `cat >/dev/null; [ "$FD0_INPUT" = /dev/fd/3 ] && cat <&3 > "$RECIPE_OUT"`}}
+	if err := RunRecipeAdd(ctx, r, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := approveRecipe(ctx, scope, "app/fd3", recipeDigest(t, ctx, scope, "app/fd3"), goodAuth()); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunServiceDeploy(ctx, DeployOpts{Name: "app/fd3"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "fd3-value" {
+		t.Fatalf("fd3 input: %q", got)
+	}
+	// A command that never reads fd 3 still finishes.
+	ignore := RecipeOpts{Name: "app/ignore", Scope: scope, Fields: []string{"token"}, Input: "fd3:file",
+		Command: []string{"/bin/sh", "-c", "exit 0"}}
+	if err := RunRecipeAdd(ctx, ignore, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := approveRecipe(ctx, scope, "app/ignore", recipeDigest(t, ctx, scope, "app/ignore"), goodAuth()); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunServiceDeploy(ctx, DeployOpts{Name: "app/ignore"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeployDryRunRunsNothing(t *testing.T) {
+	dir := serviceTestEnv(t)
+	ctx, scope := newTestVault(t)
+	saved := deploySync
+	deploySync = func(context.Context) error { return nil }
+	t.Cleanup(func() { deploySync = saved })
+	marker := filepath.Join(dir, "ran")
+	t.Setenv("RECIPE_OUT", marker)
+	if err := RunServiceAdd(ctx, ServiceAddOpts{Name: "app", Scope: scope}); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	withStdio(t, dir, "dry-value", func() {
+		err = RunServiceSet(ctx, ServiceSetOpts{Name: "app", Scope: scope, Field: "token", Env: "TOKEN"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := RecipeOpts{Name: "app/x", Scope: scope, Fields: []string{"token"}, Input: "fd3:sh", Targets: []string{"a", "b"},
+		Command: []string{"/bin/sh", "-c", `touch "$RECIPE_OUT"`}}
+	if err := RunRecipeAdd(ctx, r, false); err != nil {
+		t.Fatal(err)
+	}
+	// Dry run works before approval and reports it; nothing runs.
+	out := withStdio(t, dir, "", func() { err = RunServiceDeploy(ctx, DeployOpts{Name: "app", DryRun: true}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("dry run executed the command")
+	}
+	for _, want := range []string{"Dry run", "not approved on this device", "would run: a", "would run: b", "via fd3", "try one target first"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dry run output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "dry-value") {
+		t.Fatal("dry run printed a value")
+	}
+	if len(recipeResults(t, ctx, scope, "app/x")) != 0 {
+		t.Fatal("dry run recorded results")
+	}
+}

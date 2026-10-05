@@ -703,6 +703,7 @@ type serviceDeployCmd struct {
 	Scope   string `name:"scope" help:"Scope label or id."`
 	Target  string `name:"target" help:"Run only this target of the selected recipe."`
 	Verbose bool   `name:"verbose" short:"v" help:"Show command output. It can contain the values the command received."`
+	DryRun  bool   `name:"dry-run" help:"Sync and show what would run per recipe and target; run and record nothing."`
 }
 
 type recipeCmd struct {
@@ -719,7 +720,8 @@ type recipeCmd struct {
 type recipeDefinitionFlags struct {
 	Scope       string   `name:"scope" help:"Scope label or id of the service."`
 	Fields      []string `name:"field" required:"" help:"Service field to pass, as FIELD or FIELD=NAME (env variable or Secret key). Repeatable."`
-	Stdin       string   `name:"stdin" help:"Pass the fields on stdin as systemd-env, docker-env, sh, file, or k8s-secret:NAMESPACE/SECRET."`
+	Input       string   `name:"input" help:"Recommended: pass the fields on file descriptor 3 ($FD0_INPUT) as systemd-env, docker-env, sh, file, or k8s-secret:NAMESPACE/SECRET; stdin stays empty."`
+	Stdin       string   `name:"stdin" help:"Pass the fields on stdin instead, in the same formats. Programs the command starts first (ssh) can consume stdin."`
 	Env         bool     `name:"env" help:"Pass the fields as environment variables instead."`
 	For         []string `name:"for" help:"Targets: run the command once per target with $FD0_TARGET set (comma-separated or repeatable)."`
 	Dir         string   `name:"dir" help:"Working directory (absolute or ~/…); default: home."`
@@ -763,16 +765,18 @@ type recipeRevokeCmd struct {
 }
 
 func (f recipeDefinitionFlags) opts(name string) (cli.RecipeOpts, error) {
-	input := ""
-	switch {
-	case f.Env && f.Stdin != "":
-		return cli.RecipeOpts{}, errors.New("recipe: choose --stdin FORMAT or --env, not both")
-	case f.Env:
-		input = "env"
-	case f.Stdin != "":
-		input = "stdin:" + f.Stdin
-	default:
-		return cli.RecipeOpts{}, errors.New("recipe: choose how values arrive: --stdin FORMAT or --env")
+	input, chosen := "", 0
+	if f.Input != "" {
+		input, chosen = "fd3:"+f.Input, chosen+1
+	}
+	if f.Stdin != "" {
+		input, chosen = "stdin:"+f.Stdin, chosen+1
+	}
+	if f.Env {
+		input, chosen = "env", chosen+1
+	}
+	if chosen != 1 {
+		return cli.RecipeOpts{}, errors.New("recipe: choose exactly one of --input FORMAT (recommended), --stdin FORMAT or --env")
 	}
 	var targets []string
 	for _, t := range f.For {
@@ -1628,7 +1632,7 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		return cli.RunServiceExec(ctx, c.Run.Scope, c.Run.Service, c.Run.Fields, c.Run.Command)
 	case "service deploy <name>":
 		v := c.Service.Deploy
-		return cli.RunServiceDeploy(ctx, cli.DeployOpts{Scope: v.Scope, Name: v.Name, Target: v.Target, Verbose: v.Verbose})
+		return cli.RunServiceDeploy(ctx, cli.DeployOpts{Scope: v.Scope, Name: v.Name, Target: v.Target, Verbose: v.Verbose, DryRun: v.DryRun})
 	case "recipe add <name> <command>", "recipe edit <name> <command>":
 		f, name, edit := c.Recipe.Add.recipeDefinitionFlags, c.Recipe.Add.Name, false
 		if strings.HasPrefix(kctx.Command(), "recipe edit") {
