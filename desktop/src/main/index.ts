@@ -2807,7 +2807,11 @@ app.on("before-quit", (event) => {
   if (!quitPrepared && bridge && !installingUpdate) {
     event.preventDefault();
     quitPrepared = true;
-    void bridge.request("vault.lock", {}, 5_000)
+    // End running deploys first, so the target that was running can still
+    // record its result before the vault locks.
+    void bridge.request("recipe.stopAll", {}, 15_000)
+      .catch(() => undefined)
+      .then(() => bridge?.request("vault.lock", {}, 5_000))
       .catch(() => undefined)
       .finally(() => app.quit());
     return;

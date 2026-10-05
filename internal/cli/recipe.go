@@ -925,6 +925,15 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	}
 	// A descendant that keeps stdin open must not hold a finished command.
 	cmd.WaitDelay = 3 * time.Second
+	// The command gets its own process group, so cancelling a deploy ends
+	// everything it started (a script's children too), not only the shell.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
 	// Without verbose, stdout and stderr stay nil: the command writes straight
 	// to /dev/null, so no pipe can keep a finished command waiting.
 	if verbose {

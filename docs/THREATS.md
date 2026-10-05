@@ -897,7 +897,8 @@ keeping the whole vault unlocked or copying the value into a file. Grants
 are created only with fresh authentication in a terminal, bound to the
 device and pinned to the record ID, field and field type; a deleted,
 renamed or retyped value removes the grant, and a recreated one needs a new
-grant. Locked reads release exactly one granted value for an exact name and
+grant. A scope writer can always rotate a granted value; a field removed and
+recreated by another device between two syncs counts as such a rotation. Locked reads release exactly one granted value for an exact name and
 scope and nothing else. `fd0 lock --all` stops all grants until the next
 unlock. Values may briefly exist in ordinary memory while scopes are
 replayed; the released copy is held in protected memory.

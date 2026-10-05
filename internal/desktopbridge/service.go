@@ -439,6 +439,9 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, err
 		}
 		return s.recipeDeploy(ctx, params)
+	case "recipe.stopAll":
+		StopDeploys(12 * time.Second)
+		return struct{}{}, nil
 	case "recipe.deployStatus":
 		var params RecipeDeployStarted
 		if err := decodeParams(raw, &params); err != nil {

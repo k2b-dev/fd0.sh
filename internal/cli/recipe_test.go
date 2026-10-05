@@ -5,8 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/valentinkolb/fd0.sh/internal/agent"
 	"github.com/valentinkolb/fd0.sh/internal/proto"
@@ -393,5 +396,53 @@ func TestDeployDryRunRunsNothing(t *testing.T) {
 	}
 	if len(recipeResults(t, ctx, scope, "app/x")) != 0 {
 		t.Fatal("dry run recorded results")
+	}
+}
+
+// Cancelling a deploy ends the whole process group, not only the shell.
+func TestDeployCancelKillsChildren(t *testing.T) {
+	dir := serviceTestEnv(t)
+	ctx, scope := newTestVault(t)
+	saved := deploySync
+	deploySync = func(context.Context) error { return nil }
+	t.Cleanup(func() { deploySync = saved })
+	pidFile := filepath.Join(dir, "child.pid")
+	t.Setenv("RECIPE_OUT", pidFile)
+	if err := RunServiceAdd(ctx, ServiceAddOpts{Name: "app", Scope: scope}); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	withStdio(t, dir, "v", func() { err = RunServiceSet(ctx, ServiceSetOpts{Name: "app", Scope: scope, Field: "token", Env: "TOKEN"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := RecipeOpts{Name: "app/slow", Scope: scope, Fields: []string{"token"}, Input: "env",
+		Command: []string{"/bin/sh", "-c", `sleep 60 & echo $! > "$RECIPE_OUT"; wait`}}
+	if err := RunRecipeAdd(ctx, r, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := approveRecipe(ctx, scope, "app/slow", recipeDigest(t, ctx, scope, "app/slow"), goodAuth()); err != nil {
+		t.Fatal(err)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- RunServiceDeploy(cctx, DeployOpts{Name: "app/slow"}) }()
+	var pid int
+	for i := 0; i < 100 && pid == 0; i++ {
+		time.Sleep(50 * time.Millisecond)
+		if b, err := os.ReadFile(pidFile); err == nil {
+			pid, _ = strconv.Atoi(strings.TrimSpace(string(b)))
+		}
+	}
+	if pid == 0 {
+		t.Fatal("child did not start")
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("cancelled deploy reported success")
+	}
+	time.Sleep(200 * time.Millisecond)
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Fatalf("child %d survived the cancelled deploy", pid)
 	}
 }
