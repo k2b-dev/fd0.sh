@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { IconChevronLeft, IconLock, IconTerminal2 } from "@tabler/icons-solidjs";
-import type { SSHGrantView, VaultStatus } from "../../../shared/contracts";
+import { IconChevronLeft, IconKey, IconLock, IconTerminal2 } from "@tabler/icons-solidjs";
+import type { SecretGrantView, SSHGrantView, VaultStatus } from "../../../shared/contracts";
 import { toAppError } from "../lib/errors";
 import { Button } from "../ui/Button";
 
@@ -10,7 +10,11 @@ function grantError(cause: unknown): string {
 }
 
 export function activeGrantCount(status: VaultStatus | null): number {
-  return status?.sshGrantCount ?? 0;
+  return (status?.sshGrantCount ?? 0) + (status?.secretGrantCount ?? 0);
+}
+
+function valueTitle(g: SecretGrantView): string {
+  return g.field ? `${g.name} · ${g.field}` : g.name;
 }
 
 /** Lock-screen entry point to the grants that keep working while locked. */
@@ -23,19 +27,23 @@ export function ActiveGrantsPill(props: { count: number; onOpen(): void }): JSX.
 /** Full-window overview of active grants, shown instead of the unlock form. */
 export function ActiveGrantsOverview(props: { onBack(): void; onStatus(status: VaultStatus): void }): JSX.Element {
   const [grants, setGrants] = createSignal<SSHGrantView[]>([]);
+  const [values, setValues] = createSignal<SecretGrantView[]>([]);
   const [selectedId, setSelectedId] = createSignal("");
   const [loading, setLoading] = createSignal(true);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
-  const selected = createMemo(() => grants().find((g) => g.id === selectedId()) ?? grants()[0]);
+  const selected = createMemo(() => grants().find((g) => g.id === selectedId()) ?? (values().some((v) => v.id === selectedId()) ? undefined : grants()[0]));
+  const selectedValue = createMemo(() => values().find((v) => v.id === selectedId()) ?? (grants().length === 0 ? values()[0] : undefined));
   let alive = true;
   let back: HTMLButtonElement | undefined;
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") props.onBack(); };
   onMount(() => {
     back?.focus();
     document.addEventListener("keydown", onKey);
-    void window.fd0.sshGrant({ action: "list" })
-      .then((r) => { if (alive) setGrants(r.grants.filter((g) => g.active)); })
+    void Promise.all([
+      window.fd0.sshGrant({ action: "list" }).then((r) => { if (alive) setGrants(r.grants.filter((g) => g.active)); }),
+      window.fd0.secretGrants().then((r) => { if (alive) setValues(r.grants.filter((g) => g.active)); }),
+    ])
       .catch((cause) => { if (alive) setError(grantError(cause)); })
       .finally(() => { if (alive) setLoading(false); });
   });
@@ -62,7 +70,8 @@ export function ActiveGrantsOverview(props: { onBack(): void; onStatus(status: V
     <div class="active-grants-split">
       <div class="active-grants-list">
         <Show when={!loading()} fallback={<p role="status" class="active-grants-muted">Loading grants…</p>}>
-          <Show when={grants().length > 0} fallback={<Show when={!error()}><p class="active-grants-muted">No grants are active.</p></Show>}>
+          <Show when={grants().length + values().length === 0 && !error()}><p class="active-grants-muted">No grants are active.</p></Show>
+          <Show when={grants().length > 0}>
             <h2 class="active-grants-group">SSH hosts <span>{grants().length}</span></h2>
             <ul role="listbox" aria-label="SSH hosts">
               <For each={grants()}>{(g) => <li role="option" tabindex="0" aria-selected={selected()?.id === g.id}
@@ -71,6 +80,18 @@ export function ActiveGrantsOverview(props: { onBack(): void; onStatus(status: V
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedId(g.id); } }}>
                 <span class="active-grants-icon" aria-hidden="true"><IconTerminal2 size={16} /></span>
                 <span class="active-grants-row-text"><strong>{g.name}</strong><small>{g.user}@{g.hostname}:{g.port || 22}</small></span>
+              </li>}</For>
+            </ul>
+          </Show>
+          <Show when={values().length > 0}>
+            <h2 class="active-grants-group">Values <span>{values().length}</span></h2>
+            <ul role="listbox" aria-label="Values">
+              <For each={values()}>{(g) => <li role="option" tabindex="0" aria-selected={selectedValue()?.id === g.id}
+                class="active-grants-row" classList={{ "is-selected": selectedValue()?.id === g.id }}
+                onClick={() => setSelectedId(g.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedId(g.id); } }}>
+                <span class="active-grants-icon" aria-hidden="true"><IconKey size={16} /></span>
+                <span class="active-grants-row-text"><strong>{valueTitle(g)}</strong><small>{g.scopeLabel} · until {new Date(g.expiresAt * 1000).toLocaleDateString()}</small></span>
               </li>}</For>
             </ul>
           </Show>
@@ -93,11 +114,23 @@ export function ActiveGrantsOverview(props: { onBack(): void; onStatus(status: V
           </div>
           <p class="active-grants-muted">To remove this grant, unlock fd0 and open the host.</p>
         </>}</Show>
+        <Show when={!selected() && selectedValue()}>{(g) => <>
+          <div class="active-grants-detail-head">
+            <span class="active-grants-icon is-large" aria-hidden="true"><IconKey size={20} /></span>
+            <div><h2>{valueTitle(g())}</h2><p>{g().kind === "secret" ? "Secret" : g().kind === "pass" ? "Password item field" : "Service field"} readable while locked</p></div>
+          </div>
+          <dl class="active-grants-facts">
+            <dt>Vault</dt><dd>{g().scopeLabel}</dd>
+            <dt>Expires</dt><dd>{new Date(g().expiresAt * 1000).toLocaleString()}</dd>
+            <dt>Grant</dt><dd><code>{g().id}</code></dd>
+          </dl>
+          <p class="active-grants-muted">Every program running as your user can read this value while the grant is active. To remove it, unlock fd0 and run <code>fd0 secret revoke {g().id}</code>.</p>
+        </>}</Show>
         <Show when={error()}><p role="alert" class="active-grants-error">{error()}</p></Show>
       </div>
     </div>
     <footer class="active-grants-foot">
-      <p>Locking everything stops all grants until the next unlock. Open SSH sessions stay connected.</p>
+      <p>Locking everything stops all grants, SSH and values, until the next unlock. Open SSH sessions stay connected.</p>
       <Button variant="danger" disabled={busy()} onClick={() => void lockAll()}>Lock everything</Button>
     </footer>
   </main>;

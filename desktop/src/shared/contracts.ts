@@ -9,6 +9,7 @@ export type BridgeErrorShape = {
 
 export type VaultStatus = {
  sshGrantCount?: number;
+ secretGrantCount?: number;
  sshGrantsSupported?: boolean;
   vaultExists: boolean;
   agentRunning: boolean;
@@ -46,6 +47,12 @@ export type AuthMethodSummary = {
   pinMode?: "none" | "required" | "optional";
   touchPolicy?: string;
   default?: boolean;
+};
+
+/** A grant that keeps one value readable while locked; never the value. */
+export type SecretGrantView = {
+  id: string; scopeId: string; scopeLabel: string; kind: "secret" | "pass" | "service"; name: string;
+  field: string; fieldType: string; expiresAt: number; active: boolean;
 };
 
 export type RecipeMapping = { field: string; as?: string };
@@ -530,6 +537,7 @@ export type DesktopAPI = {
   lock(all?: boolean): Promise<VaultStatus>;
  sshGrant(input: SSHGrantInput): Promise<SSHGrantResult>;
   recipeList(scopeId: string, service: string): Promise<{ recipes: RecipeView[] }>;
+  secretGrants(): Promise<{ deviceId: string; grants: SecretGrantView[] }>;
   recipeApprove(input: RecipeApproveInput): Promise<{ recipes: RecipeView[] }>;
   recipeDeploy(input: RecipeDeployInput): Promise<RecipeDeployResult>;
   restartAgent(): Promise<VaultStatus>;

@@ -73,6 +73,7 @@ const api: DesktopAPI = {
   lock: (all) => invoke("fd0:lock", all),
  sshGrant: (input) => invoke("fd0:ssh-grant", input),
   recipeList: (scopeId, service) => invoke("fd0:recipe-list", scopeId, service),
+  secretGrants: () => invoke("fd0:secret-grants"),
   recipeApprove: (input) => invoke("fd0:recipe-approve", input),
   recipeDeploy: (input) => invoke("fd0:recipe-deploy", input),
   restartAgent: () => invoke("fd0:restart-agent"),

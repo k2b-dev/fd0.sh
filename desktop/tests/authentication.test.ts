@@ -122,3 +122,13 @@ test("the grants overview shows listing errors", () => withPage(async (page) => 
   await alert.waitFor();
   expect(await alert.isVisible()).toBe(true);
 }));
+
+test("value grants appear in the overview without values", () => withPage(async (page) => {
+  await page.evaluate(() => window.authTest.values());
+  await page.getByRole("button", { name: "1 active grant", exact: true }).click();
+  await page.getByRole("heading", { name: "Active while locked" }).waitFor();
+  await page.getByRole("option", { name: /cld-client-secret/ }).click();
+  await page.getByRole("heading", { name: "cld-client-secret" }).waitFor();
+  expect(await page.getByText("fd0 secret revoke sg_1").isVisible()).toBe(true);
+  expect(await page.getByRole("button", { name: "Open SSH" }).count()).toBe(0);
+}));

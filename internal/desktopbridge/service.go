@@ -53,6 +53,7 @@ type HandshakeResult struct {
 
 type StatusResult struct {
 	SSHGrantCount      int  `json:"sshGrantCount"`
+	SecretGrantCount   int  `json:"secretGrantCount"`
 	SSHGrantsSupported bool `json:"sshGrantsSupported"`
 	VaultExists        bool `json:"vaultExists"`
 	AgentRunning       bool `json:"agentRunning"`
@@ -413,6 +414,13 @@ func (s *Service) Handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, fail("validation", "That setup link is not a valid TOTP account.", err.Error(), false)
 		}
 		return value, nil
+	case "secret.grants":
+		// Metadata only, never values; works while locked.
+		resp, err := cli.ManageSecretGrant(ctx, agent.SecretGrantReq{Action: "list"})
+		if err != nil {
+			return nil, mapDomainError(err)
+		}
+		return resp, nil
 	case "recipe.list":
 		var params RecipeListParams
 		if err := decodeParams(raw, &params); err != nil {
@@ -870,6 +878,7 @@ func (s *Service) status() (StatusResult, error) {
 		return StatusResult{}, mapDomainError(err)
 	}
 	result.SSHGrantCount = status.SSHGrantCount
+	result.SecretGrantCount = status.SecretGrantCount
 	result.SSHGrantsSupported = status.SSHGrantsSupported
 	result.Unlocked = status.Unlocked
 	result.UnlockedSince = status.SinceUnix

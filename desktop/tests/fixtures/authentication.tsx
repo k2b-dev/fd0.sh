@@ -12,11 +12,13 @@ let submitted: UnlockInput | null = null;
 let fail = false;
 let failList = false;
 let opened: unknown = null;
+let valueGrants: unknown[] = [];
 const activeGrants = [{id:"g1",scopeId:"work",name:"build-1",hostname:"build-1.test",user:"admin",port:22,fingerprint:"synthetic",hostFingerprints:["synthetic-server"],active:true},
  {id:"g2",scopeId:"work",name:"backup-1",hostname:"backup-1.test",user:"admin",port:22,fingerprint:"synthetic",hostFingerprints:["synthetic-server"],active:true}];
 const preview = {deviceId:"test",digest:"reviewed",grants:[{id:"test",scopeId:"work",name:"host",hostname:"host.test",user:"admin",port:22,fingerprint:"synthetic",hostFingerprints:["synthetic-server"],active:false}]};
 Object.defineProperty(window,"fd0",{value:{development:false,status:async()=>status,
  openSSHHost:async(ref:unknown)=>{opened=ref;},
+ secretGrants:async()=>({deviceId:"test",grants:valueGrants}),
  lock:async()=>{const next={...vault.status()!,sshGrantCount:0};vault.setStatus(next);return next;},
  unlock:async(input:UnlockInput)=>{if(fail) throw new Error("Synthetic failure");submitted=input;return status},
  sshGrant:async(input:SSHGrantInput)=>{
@@ -33,7 +35,8 @@ render(()=><VaultContext.Provider value={vault}>
  </Show>
 </VaultContext.Provider>,document.body);
 const authTest={missing:()=>vault.setStatus({...status,authMethods:[]}),
- grants:(count:number,listFails=false)=>{failList=listFails;vault.setStatus({...status,unlocked:false,sshGrantCount:count});},mode:setMode,submitted:()=>submitted,opened:()=>opened,fail:(value:boolean)=>{fail=value},
+ grants:(count:number,listFails=false)=>{failList=listFails;vault.setStatus({...status,unlocked:false,sshGrantCount:count});},
+ values:()=>{valueGrants=[{id:"sg_1",scopeId:"work",scopeLabel:"work",kind:"secret",name:"cld-client-secret",field:"",fieldType:"secret",expiresAt:Math.floor(Date.now()/1000)+86400,active:true}];vault.setStatus({...status,unlocked:false,sshGrantCount:0,secretGrantCount:1});},mode:setMode,submitted:()=>submitted,opened:()=>opened,fail:(value:boolean)=>{fail=value},
  pin:(pinMode:"none"|"required"|"optional",supported=true)=>vault.setStatus({...status,yubikey:supported,authMethods:status.authMethods?.map(m=>m.id==="key"?{...m,pinMode}:m)})};
 declare global { interface Window { authTest: typeof authTest } }
 window.authTest=authTest;

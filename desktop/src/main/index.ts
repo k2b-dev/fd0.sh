@@ -1426,6 +1426,7 @@ function registerIPC(client: BridgeSupervisor): void {
     if (input.action === "create" || input.action === "revoke") sendCommand("refresh");
     return result;
   });
+  handle("fd0:secret-grants", () => client.request("secret.grants", {}));
   handle("fd0:recipe-list", (scopeId: string, service: string) =>
     client.request("recipe.list", { scopeId: String(scopeId), service: String(service) }));
   handle("fd0:recipe-approve", async (input: RecipeApproveInput) => {
