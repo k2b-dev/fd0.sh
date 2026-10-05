@@ -84,6 +84,7 @@ type Server struct {
 	deviceID      string
 	sshGrants     []activeSSHGrant
 	secretGrants  []activeSecretGrant
+	grantScopes   map[string]string // scope ID → label, for locked grant reads
 }
 
 // Listen creates ~/.fd0/agent.sock and accepts connections. The directory
@@ -330,6 +331,9 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	_ = c.SetDeadline(time.Now().Add(responseTimeout))
 	resp := s.dispatch(requestCtx, &req)
 	_ = WriteFrame(c, resp)
+	if resp != nil && resp.SecretGrant != nil {
+		crypto.Wipe(resp.SecretGrant.Value)
+	}
 }
 
 func (s *Server) dispatch(ctx context.Context, req *Request) (resp *Response) {
@@ -727,6 +731,7 @@ func (s *Server) handleReSeal(r *ReSealReq) *Response {
 	body.SSHGrants = current.SSHGrants
 	body.RecipeApprovals = current.RecipeApprovals
 	body.SecretGrants = current.SecretGrants
+	s.pruneSecretGrantsHeld(body)
 	redacted := *body
 	redacted.SuperPriv = make([]byte, ed25519.PrivateKeySize)
 	rb, err := proto.Marshal(redacted)

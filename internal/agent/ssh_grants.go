@@ -281,6 +281,7 @@ func (s *Server) handleSSHGrant(ctx context.Context, r *SSHGrantReq) *Response {
 }
 
 func (s *Server) saveSSHGrantsHeld(body *proto.VaultBody) error {
+	s.pruneSecretGrantsHeld(body)
 	body.SuperPriv = append([]byte(nil), s.superPriv.Bytes()...)
 	defer crypto.Wipe(body.SuperPriv)
 	redacted := *body

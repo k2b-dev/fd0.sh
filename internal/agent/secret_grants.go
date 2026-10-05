@@ -54,6 +54,62 @@ func (s *Server) clearSecretGrantsHeld() {
 		g.value.Destroy()
 	}
 	s.secretGrants = nil
+	s.grantScopes = nil
+}
+
+// pruneSecretGrantsHeld removes grants that expired or whose value no
+// longer exists as granted, before a vault write persists the body. Only a
+// definite invalidation removes a grant; a scope that cannot be replayed
+// right now keeps its grants.
+func (s *Server) pruneSecretGrantsHeld(body *proto.VaultBody) {
+	if s.superPriv == nil || len(body.SecretGrants) == 0 {
+		return
+	}
+	now := time.Now().Unix()
+	states := map[string]*chain.ScopeState{}
+	defer func() {
+		for _, st := range states {
+			if st != nil {
+				secretgrant.WipeScope(st)
+			}
+		}
+	}()
+	keep := body.SecretGrants[:0]
+	for _, g := range body.SecretGrants {
+		if g.DeviceID == s.deviceID {
+			if g.ExpiresAt <= now {
+				continue
+			}
+			st, seen := states[g.ScopeID]
+			if !seen {
+				st, _ = secretgrant.ReplayScope(s.paths, body, s.userSuperPub, s.superPriv.Bytes(), g.ScopeID)
+				states[g.ScopeID] = st
+			}
+			if st != nil {
+				value, err := secretgrant.Value(st, g)
+				crypto.Wipe(value)
+				if errors.Is(err, secretgrant.ErrInvalidated) {
+					continue
+				}
+			}
+		}
+		keep = append(keep, g)
+	}
+	body.SecretGrants = keep
+}
+
+// dropExpiredHeld destroys released values whose grant expired.
+func (s *Server) dropExpiredHeld() {
+	now := time.Now().Unix()
+	keep := s.secretGrants[:0]
+	for _, a := range s.secretGrants {
+		if a.grant.ExpiresAt <= now {
+			a.value.Destroy()
+			continue
+		}
+		keep = append(keep, a)
+	}
+	s.secretGrants = keep
 }
 
 // refreshSecretGrantsHeld rebuilds the released values from the unlocked
@@ -64,6 +120,11 @@ func (s *Server) refreshSecretGrantsHeld(body *proto.VaultBody) {
 	s.clearSecretGrantsHeld()
 	if s.superPriv == nil || s.deviceID == "" {
 		return
+	}
+	// Scope labels and IDs as known at unlock, for locked reads by label.
+	s.grantScopes = map[string]string{}
+	for id, sd := range body.Scopes {
+		s.grantScopes[id] = sd.Label
 	}
 	now := time.Now().Unix()
 	states := map[string]*chain.ScopeState{}
@@ -162,6 +223,7 @@ func (s *Server) handleSecretGrant(ctx context.Context, r *SecretGrantReq) *Resp
 	out := &SecretGrantResp{DeviceID: s.deviceID, Grants: []SecretGrantView{}}
 	switch r.Action {
 	case "read":
+		s.dropExpiredHeld()
 		value, err := s.readGrantHeld(r)
 		if err != nil {
 			return errResp(err.Error())
@@ -180,6 +242,7 @@ func (s *Server) handleSecretGrant(ctx context.Context, r *SecretGrantReq) *Resp
 			}
 		} else {
 			// Locked: only what is active is known, as for SSH grants.
+			s.dropExpiredHeld()
 			for _, a := range s.secretGrants {
 				if a.grant.ExpiresAt > time.Now().Unix() {
 					out.Grants = append(out.Grants, SecretGrantView{SecretGrant: a.grant, ScopeLabel: a.scopeLabel, Active: true})
@@ -265,25 +328,45 @@ func (s *Server) viewHeld(g proto.SecretGrant) SecretGrantView {
 // readGrantHeld returns one active, unexpired granted value. The scope must
 // match the grant's scope ID or its label exactly; names never prefix-match.
 func (s *Server) readGrantHeld(r *SecretGrantReq) ([]byte, error) {
-	now := time.Now().Unix()
+	scope, err := s.resolveGrantScopeHeld(r.ScopeID)
+	if err != nil {
+		return nil, err
+	}
 	var hit *activeSecretGrant
 	for i := range s.secretGrants {
 		a := &s.secretGrants[i]
-		if a.grant.Kind != r.Kind || a.grant.Name != r.Name || a.grant.Field != r.Field || a.grant.ExpiresAt <= now {
-			continue
+		if a.grant.ScopeID == scope && a.grant.Kind == r.Kind && a.grant.Name == r.Name && a.grant.Field == r.Field {
+			hit = a
 		}
-		if r.ScopeID != "" && r.ScopeID != a.grant.ScopeID && r.ScopeID != a.scopeLabel {
-			continue
-		}
-		if hit != nil {
-			return nil, errors.New("several grants match; pass the scope ID")
-		}
-		hit = a
 	}
 	if hit == nil {
 		return nil, errors.New("locked")
 	}
 	return append([]byte(nil), hit.value.Bytes()...), nil
+}
+
+// resolveGrantScopeHeld maps a scope ID or label to one scope ID. An exact
+// ID wins; a label must name exactly one scope known at unlock.
+func (s *Server) resolveGrantScopeHeld(scope string) (string, error) {
+	if scope == "" {
+		return "", errors.New("pass --scope to read a granted value while locked")
+	}
+	if _, ok := s.grantScopes[scope]; ok {
+		return scope, nil
+	}
+	match := ""
+	for id, label := range s.grantScopes {
+		if label == scope {
+			if match != "" {
+				return "", errors.New("several scopes have that label; pass the scope ID")
+			}
+			match = id
+		}
+	}
+	if match == "" {
+		return "", errors.New("locked")
+	}
+	return match, nil
 }
 
 // SecretGrant sends a secret grant request to the agent.
@@ -306,11 +389,6 @@ func (c *Client) SecretGrant(r SecretGrantReq) (*SecretGrantResp, error) {
 }
 
 func (s *Server) activeSecretGrantCountHeld() int {
-	n, now := 0, time.Now().Unix()
-	for _, a := range s.secretGrants {
-		if a.grant.ExpiresAt > now {
-			n++
-		}
-	}
-	return n
+	s.dropExpiredHeld()
+	return len(s.secretGrants)
 }

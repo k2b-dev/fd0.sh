@@ -550,8 +550,8 @@ func RunLock(ctx context.Context) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "✓ vault locked")
-	if st, err := cli.Status(); err == nil && st.SSHGrantCount > 0 {
-		fmt.Fprintf(os.Stderr, "%d SSH grants remain active; use fd0 lock --all to stop them.\n", st.SSHGrantCount)
+	if st, err := cli.Status(); err == nil && st.SSHGrantCount+st.SecretGrantCount > 0 {
+		fmt.Fprintf(os.Stderr, "%d SSH grants and %d value grants remain active; use fd0 lock --all to stop them.\n", st.SSHGrantCount, st.SecretGrantCount)
 	}
 	return nil
 }
@@ -560,7 +560,8 @@ func RunLock(ctx context.Context) error {
 type statusJSON struct {
 	Agent         string         `json:"agent"` // "running" or "not_running"
 	Unlocked      bool           `json:"unlocked"`
-	SSHGrantCount int            `json:"sshGrantCount"`
+	SSHGrantCount    int            `json:"sshGrantCount"`
+	SecretGrantCount int            `json:"secretGrantCount"`
 	Servers       []pinnedStatus `json:"servers,omitempty"`
 }
 
@@ -618,10 +619,13 @@ func RunStatus(ctx context.Context, asJSON, withServers bool) error {
 		}
 	}
 	if asJSON {
-		return json.NewEncoder(os.Stdout).Encode(statusJSON{Agent: "running", Unlocked: st.Unlocked, SSHGrantCount: st.SSHGrantCount, Servers: servers})
+		return json.NewEncoder(os.Stdout).Encode(statusJSON{Agent: "running", Unlocked: st.Unlocked, SSHGrantCount: st.SSHGrantCount, SecretGrantCount: st.SecretGrantCount, Servers: servers})
 	}
 	if st.SSHGrantCount > 0 {
 		fmt.Printf("SSH grants: %d active (fd0 lock --all stops them)\n", st.SSHGrantCount)
+	}
+	if st.SecretGrantCount > 0 {
+		fmt.Printf("Value grants: %d active (fd0 lock --all stops them)\n", st.SecretGrantCount)
 	}
 	if !st.Unlocked {
 		fmt.Println("agent: running, locked")

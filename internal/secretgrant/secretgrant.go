@@ -29,6 +29,12 @@ const (
 	MaxGrants  = 256
 )
 
+// ErrInvalidated means the granted value no longer exists as granted: the
+// record was deleted, moved, renamed or retyped, or the field was removed or
+// changed type. Such a grant is removed for good at the next vault write, so
+// a recreated record or field never inherits it.
+var ErrInvalidated = errors.New("granted value was deleted, renamed or changed type")
+
 // RecordName is the stored record name for a kind and bare name.
 func RecordName(kind, name string) (string, error) {
 	switch kind {
@@ -106,7 +112,9 @@ func Find(st *chain.ScopeState, kind, name, field string) (recordID, fieldType s
 		if recordID != "" {
 			return "", "", fmt.Errorf("%s %q is ambiguous in this scope", kind, name)
 		}
-		_, fieldType, err = extract(cur.Record, kind, field)
+		var value []byte
+		value, fieldType, err = extract(cur.Record, kind, field)
+		crypto.Wipe(value)
 		if err != nil {
 			return "", "", err
 		}
@@ -124,22 +132,23 @@ func Find(st *chain.ScopeState, kind, name, field string) (recordID, fieldType s
 func Value(st *chain.ScopeState, g proto.SecretGrant) ([]byte, error) {
 	cur, ok := st.SecretIndex[g.RecordID]
 	if !ok || cur.Record == nil {
-		return nil, errors.New("granted record was deleted or moved")
+		return nil, ErrInvalidated
 	}
 	recordName, err := RecordName(g.Kind, g.Name)
 	if err != nil {
 		return nil, err
 	}
 	if cur.Record.Name != recordName {
-		return nil, errors.New("granted record was renamed")
+		return nil, ErrInvalidated
 	}
 	value, fieldType, err := extract(cur.Record, g.Kind, g.Field)
 	if err != nil {
-		return nil, err
+		// A missing or retyped field is an invalidation, not a transient error.
+		return nil, ErrInvalidated
 	}
 	if fieldType != g.FieldType {
 		crypto.Wipe(value)
-		return nil, errors.New("granted field changed type")
+		return nil, ErrInvalidated
 	}
 	return value, nil
 }

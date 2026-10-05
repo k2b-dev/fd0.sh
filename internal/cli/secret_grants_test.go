@@ -138,16 +138,17 @@ func TestSecretGrantsLifecycle(t *testing.T) {
 		t.Fatalf("lock --all left a grant active: %v", err)
 	}
 
-	// Grants survive ordinary vault writes and can be revoked.
+	// Grants survive ordinary vault writes; the renamed service's grant was
+	// removed for good at the rename. Grants can be revoked.
 	unlock()
 	list, err := ManageSecretGrant(ctx, agent.SecretGrantReq{Action: "list"})
-	if err != nil || len(list.Grants) != 3 {
+	if err != nil || len(list.Grants) != 2 {
 		t.Fatalf("list: %+v %v", list, err)
 	}
 	if err := RunValueRevoke(ctx, list.Grants[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if list, _ = ManageSecretGrant(ctx, agent.SecretGrantReq{Action: "list"}); len(list.Grants) != 2 {
+	if list, _ = ManageSecretGrant(ctx, agent.SecretGrantReq{Action: "list"}); len(list.Grants) != 1 {
 		t.Fatalf("revoke: %+v", list)
 	}
 }
@@ -166,4 +167,59 @@ func scopeNameForTest(t *testing.T, scope string) string {
 	}
 	t.Fatal("no scope label on active grants")
 	return ""
+}
+
+// A field that is removed and created again under the same name must not
+// inherit the old grant, and locked reads need an unambiguous scope.
+func TestSecretGrantsDoNotResurrect(t *testing.T) {
+	dir := serviceTestEnv(t)
+	ctx, scope := newTestVault(t)
+	paths, _ := fdhome.Resolve()
+	client := agent.NewClient(paths.AgentSock)
+	if err := RunServiceAdd(ctx, ServiceAddOpts{Name: "app", Scope: scope}); err != nil {
+		t.Fatal(err)
+	}
+	set := func(value string) {
+		t.Helper()
+		var err error
+		withStdio(t, dir, value, func() { err = RunServiceSet(ctx, ServiceSetOpts{Name: "app", Scope: scope, Field: "token"}) })
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	set("granted-value")
+	if _, err := createGrant(t, ctx, "service", scope, "app", "token", goodAuth()); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunServiceFieldRemove(ctx, scope, "app", "token", true); err != nil {
+		t.Fatal(err)
+	}
+	set("new-value-never-approved")
+	if err := client.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	out := withStdio(t, dir, "", func() { err = RunServiceGet(ctx, scope, "app", "token", true) })
+	if !errors.Is(err, ErrAgentLocked) || strings.Contains(out, "new-value") {
+		t.Fatalf("recreated field inherited the grant: %q %v", out, err)
+	}
+	if _, err := client.Unlock(paths.Vault, paths.UserChain, proto.AuthPassphrase, agent.UnlockCredential{Passphrase: []byte("correct horse battery staple")}); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := ManageSecretGrant(ctx, agent.SecretGrantReq{Action: "list"}); len(list.Grants) != 0 {
+		t.Fatalf("invalidated grant kept: %+v", list.Grants)
+	}
+	// A new grant on the recreated field works; reads need --scope.
+	if _, err := createGrant(t, ctx, "service", scope, "app", "token", goodAuth()); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grantedValue("service", "", "app", "token"); err == nil {
+		t.Fatal("read without scope released a value")
+	}
+	if v, err := grantedValue("service", scope, "app", "token"); err != nil || string(v) != "new-value-never-approved" {
+		t.Fatalf("explicit scope read: %q %v", v, err)
+	}
 }

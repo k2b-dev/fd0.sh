@@ -3,6 +3,7 @@ package desktopbridge
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,10 +96,11 @@ func (s *Service) recipeApprove(ctx context.Context, p RecipeApproveParams) (Rec
 // Deploys run as background jobs: the bridge serves one request at a time,
 // so a deploy that takes minutes must not block status polling.
 type deployJob struct {
-	mu      sync.Mutex
-	done    bool
-	results []recipe.Result
-	err     string
+	mu       sync.Mutex
+	done     bool
+	finished time.Time
+	results  []recipe.Result
+	err      string
 }
 
 type RecipeDeployStarted struct {
@@ -115,7 +117,25 @@ var (
 	deployJobsMu sync.Mutex
 	deployJobs   = map[string]*deployJob{}
 	deployJobSeq int
+	// deployCtx ends running deploys when the bridge shuts down, so recipe
+	// commands do not outlive it and the device's deploy lock stays honest.
+	deployCtx, cancelDeploys = context.WithCancel(context.Background())
+	deployWG                 sync.WaitGroup
 )
+
+const maxDeployJobs = 32
+
+// StopDeploys cancels running deploys and waits up to timeout for them to
+// record the result of the target they were running.
+func StopDeploys(timeout time.Duration) {
+	cancelDeploys()
+	done := make(chan struct{})
+	go func() { deployWG.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
+}
 
 // recipeDeploy starts a deploy and returns at once. A failed command is a
 // result, not a bridge error, so Desktop can show it in place.
@@ -128,13 +148,28 @@ func (s *Service) recipeDeploy(_ context.Context, p RecipeDeployParams) (RecipeD
 	}
 	job := &deployJob{results: []recipe.Result{}}
 	deployJobsMu.Lock()
+	// Forget finished jobs nobody collected after ten minutes.
+	for id, old := range deployJobs {
+		old.mu.Lock()
+		stale := old.done && time.Since(old.finished) > 10*time.Minute
+		old.mu.Unlock()
+		if stale {
+			delete(deployJobs, id)
+		}
+	}
+	if len(deployJobs) >= maxDeployJobs {
+		deployJobsMu.Unlock()
+		return RecipeDeployStarted{}, fail("busy", "Too many deploys are pending.", "Wait for running deploys to finish.", true)
+	}
 	deployJobSeq++
 	id := "deploy-" + strconv.Itoa(deployJobSeq)
 	deployJobs[id] = job
 	deployJobsMu.Unlock()
+	deployWG.Add(1)
 	go func() {
+		defer deployWG.Done()
 		// Not the request context: the deploy outlives this request.
-		err := cli.RunServiceDeploy(context.Background(), cli.DeployOpts{
+		err := cli.RunServiceDeploy(deployCtx, cli.DeployOpts{
 			Scope: p.ScopeID, Name: p.Name, Target: p.Target,
 			Env: []string{"PATH=" + userShellPath()},
 			OnResult: func(r recipe.Result) {
@@ -145,9 +180,9 @@ func (s *Service) recipeDeploy(_ context.Context, p RecipeDeployParams) (RecipeD
 		})
 		job.mu.Lock()
 		if err != nil {
-			job.err = err.Error()
+			job.err = deployErrorText(err)
 		}
-		job.done = true
+		job.done, job.finished = true, time.Now()
 		job.mu.Unlock()
 	}()
 	return RecipeDeployStarted{JobID: id}, nil
@@ -222,4 +257,17 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+// deployErrorText keeps the mapped, user-facing message for operational
+// failures (locked vault, busy device, sync errors).
+func deployErrorText(err error) string {
+	var me *methodError
+	if errors.As(mapDomainError(err), &me) && me.bridge.Message != "" {
+		if me.bridge.Action != "" {
+			return me.bridge.Message + " " + me.bridge.Action
+		}
+		return me.bridge.Message
+	}
+	return err.Error()
 }
