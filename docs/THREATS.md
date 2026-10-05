@@ -886,3 +886,18 @@ deploying at the same time can race; one deploying device per target, or a
 destination that rejects stale writes, avoids that. An older agent that does
 not know recipe approvals drops them when it rewrites the vault; deploys then
 refuse until the recipe is approved again.
+
+## Secret grants
+
+A secret grant (docs/SECRET_GRANTS_PLAN.md) keeps one value readable on one
+device while the vault is locked, for unattended consumers that run as the
+same OS user. While a grant is active, every process of that user can read
+the value through the agent socket; that is the documented trade against
+keeping the whole vault unlocked or copying the value into a file. Grants
+are created only with fresh authentication in a terminal, bound to the
+device and pinned to the record ID, field and field type; a deleted,
+renamed or retyped value removes the grant, and a recreated one needs a new
+grant. Locked reads release exactly one granted value for an exact name and
+scope and nothing else. `fd0 lock --all` stops all grants until the next
+unlock. Values may briefly exist in ordinary memory while scopes are
+replayed; the released copy is held in protected memory.

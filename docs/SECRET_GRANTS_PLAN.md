@@ -1,6 +1,6 @@
 # Secret grants plan
 
-Status: draft, reviewed 2026-10-03 (see Review). Not implemented.
+Status: implemented 2026-10-05 as reviewed (see Review), with two Codex code reviews.
 
 ## Outcome and scope
 
@@ -67,3 +67,11 @@ Grants must not weaken anything else: the vault identity, payload and scope keys
 - CLI tests: exit codes, `--json` output without values, exact-name enforcement while locked.
 - Isolated integration script under the guarded runner: a consumer reads a granted secret after `fd0 lock`, fails after `lock --all`.
 - Threat documentation updated in `docs/THREATS.md` and the fd0 skill.
+
+## As built (2026-10-05)
+
+- Commands: `fd0 secret grant NAME --scope S`, `fd0 pass grant ITEM FIELD --scope S`, `fd0 service grant NAME FIELD --scope S`, each with `--ttl` (default 30d, at most 365d) and fresh authentication in a terminal; `fd0 secret grants [--json]` and `fd0 secret revoke ID` cover all three kinds.
+- Locked reads use the existing commands with exact names and `--scope` (scope ID, or a label that names exactly one scope): `fd0 secret get NAME --raw`, `fd0 pass field get ITEM FIELD --raw`, `fd0 service get NAME FIELD --raw`. With a matching grant the interactive unlock prompt is skipped.
+- The agent refreshes granted values at unlock and after every vault write. A grant whose record or field was deleted, renamed or retyped is removed for good at the next vault write, so a recreated record or field never inherits it. Expiry is checked on every read; `lock --all`, revocation and agent shutdown destroy released values. `fd0 lock` and `fd0 status` report active value grants.
+- Desktop lists active value grants on the lock screen next to SSH hosts (name, vault, expiry, never the value). Creating and revoking stays in the CLI.
+- Limit: decrypted records are Go strings during replay, so values can still exist in ordinary heap memory briefly; the released copy is held in protected memory and wiped after each response.

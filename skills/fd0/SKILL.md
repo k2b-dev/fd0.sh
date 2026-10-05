@@ -330,6 +330,20 @@ fd0 card export                                       # a person imports this ca
 
 Consumers call `fd0 unlock --key-file …` at the start of every job; it does nothing when already unlocked. The agent's background sync never pins a server, so run `fd0 sync --pin` once after setup. Never copy a machine's `FD0_HOME` to another host. With systemd, load the key with `LoadCredential=fd0.key:/etc/credstore/ci-fd0.key` (or `LoadCredentialEncrypted=`) and use `--key-file "$CREDENTIALS_DIRECTORY/fd0.key"`. Add machines with `--role reader` (or `writer` when they must rotate values) so they cannot change membership, and still prefer dedicated scopes with only their own credentials. Keep an independent copy of those credentials so the scope can be recreated. After removing a machine, check the member list and rotate every value it could read; if members were added that you did not add, create a new scope instead of repairing the old one.
 
+## Values readable while locked (secret grants)
+
+For an unattended consumer on the user's own device that needs one value while the vault is locked — a `cld` agent profile reading its client secret, a backup job reading one token — the user creates a grant in a terminal (fresh authentication; agents must not create grants):
+
+```sh
+fd0 secret grant cld-client-secret --scope private-pass --ttl 90d
+fd0 pass grant mail password --scope work
+fd0 service grant app token --scope ops
+fd0 secret grants              # list (never values); fd0 secret revoke ID
+fd0 secret get cld-client-secret --raw --scope private-pass   # works while locked
+```
+
+Locked reads need the exact name and `--scope`. Every process of the OS user can read a granted value while the grant is active; prefer a narrow value and a short TTL. Renaming or deleting the value removes the grant. `fd0 lock --all` stops all grants until the next unlock.
+
 ## Services
 
 `fd0 service` holds credentials that programs consume, one record per service with typed fields (`secret`, `text`, `file`), optional env names and change stamps. Use `pass` for logins people use and `service` for values software reads.
