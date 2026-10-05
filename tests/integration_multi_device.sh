@@ -419,7 +419,8 @@ rm -f /tmp/fd0-rl.db /tmp/fd0-rl.log /tmp/fd0-rl-first.code
 # Drop a ~/.fd0/config.toml on a fresh home with [agent] knobs and
 # confirm fd0-agent picks them up without --idle-timeout / FD0_AGENT_IDLE.
 step "23) Agent reads [agent].idle_timeout from config"
-TEST_HOME=/tmp/fd0-agent-cfg-test
+# Inside the isolated run so the runner cleans it up with everything else.
+TEST_HOME="$HOME/.fd0-agent-cfg-test"
 rm -rf "$TEST_HOME"
 mkdir -p "$TEST_HOME" && chmod 700 "$TEST_HOME"
 cat > "$TEST_HOME/config.toml" <<EOF
@@ -441,7 +442,7 @@ case "$ST" in
     *"unlocked"*) ok "agent up with config-driven [agent] knobs (smoke)" ;;
     *) no "agent didn't come up cleanly: $ST" ;;
 esac
-env FD0_HOME="$TEST_HOME" FD0_SSH_SOCK="$TEST_HOME/ssh.sock" "$FD0" lock >/dev/null 2>&1 || true
+env FD0_HOME="$TEST_HOME" FD0_SSH_SOCK="$TEST_HOME/ssh.sock" "$FD0" agent stop >/dev/null 2>&1 || true
 rm -rf "$TEST_HOME"
 
 # ─── Summary ─────────────────────────────────────────────────────────────
