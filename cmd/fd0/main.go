@@ -368,6 +368,7 @@ type sftpRemoveCmd struct {
 
 // ───── pass ───────────────────────────────────────────────────────────
 type passCmd struct {
+	Grant    fieldGrantCmd   `cmd:"" help:"Keep one text or secret field readable on this device while fd0 is locked."`
 	Tags     passTagsCmd     `cmd:"" help:"Organize password items with tags."`
 	Browse   passBrowseCmd   `cmd:"" default:"withargs" help:"Open the interactive pass browser."`
 	Add      passAddCmd      `cmd:"" help:"Create a pass item."`
@@ -697,6 +698,7 @@ type serviceCmd struct {
 	Move      serviceMoveCmd      `cmd:"" help:"Move a service between scopes."`
 	History   itemHistoryCmd      `cmd:"" help:"Show or restore earlier versions of a service."`
 	Deploy    serviceDeployCmd    `cmd:"" help:"Sync, then run the service's approved recipes in name order (all, one recipe, or one target)."`
+	Grant     fieldGrantCmd       `cmd:"" help:"Keep one text or secret field readable on this device while fd0 is locked."`
 }
 type serviceDeployCmd struct {
 	Name    string `arg:"" help:"SERVICE (all its recipes) or SERVICE/NAME (one recipe)."`
@@ -998,6 +1000,26 @@ type listCmd struct {
 // spellings use, so `fd0 get` and `fd0 secret get` cannot grow different
 // flags. Rename/move/history come from the same shared surfaces every other
 // module embeds.
+type valueGrantCmd struct {
+	Name   string `arg:"" help:"Secret name."`
+	Scope  string `name:"scope" required:"" help:"Scope label or id."`
+	TTL    string `name:"ttl" help:"Lifetime, for example 30d or 72h (default 30d, at most 365d)."`
+	Method string `name:"method" help:"Auth method type or method_id to use."`
+}
+type fieldGrantCmd struct {
+	Name   string `arg:"" help:"Item or service name."`
+	Field  string `arg:"" help:"Field name (pass: field path)."`
+	Scope  string `name:"scope" required:"" help:"Scope label or id."`
+	TTL    string `name:"ttl" help:"Lifetime, for example 30d or 72h (default 30d, at most 365d)."`
+	Method string `name:"method" help:"Auth method type or method_id to use."`
+}
+type valueGrantsCmd struct {
+	JSON bool `name:"json" help:"Machine-readable output (no values)."`
+}
+type valueRevokeCmd struct {
+	ID string `arg:"" help:"Grant ID (sg_…)."`
+}
+
 type secretCmd struct {
 	Get     getCmd          `cmd:"" help:"Print a secret to stdout. Interactive when called without NAME."`
 	Copy    copyCmd         `cmd:"" help:"Copy a secret to the clipboard with auto-clear."`
@@ -1007,6 +1029,9 @@ type secretCmd struct {
 	Rm      rmCmd           `cmd:"" help:"Remove a secret (writes a tombstone)."`
 	Move    secretMoveCmd   `cmd:"" help:"Move a secret between scopes."`
 	History itemHistoryCmd  `cmd:"" help:"Show or restore earlier versions of a secret."`
+	Grant   valueGrantCmd   `cmd:"" help:"Keep one secret readable on this device while fd0 is locked (fresh authentication)."`
+	Grants  valueGrantsCmd  `cmd:"" help:"List this device's secret grants (secrets, pass and service fields); never values."`
+	Revoke  valueRevokeCmd  `cmd:"" help:"Remove a secret grant (vault unlocked)."`
 }
 type secretRenameCmd struct {
 	Name  string `arg:"" help:"Current secret name."`
@@ -1203,6 +1228,9 @@ func maybeAutoUnlock(kctx *kong.Context, c *rootCLI) error {
 		if err == nil && st.Unlocked {
 			return nil
 		}
+		if err == nil && !st.Unlocked && st.SecretGrantCount > 0 && commandHasValueGrant(kctx.Command(), c) {
+			return nil
+		}
 		if err == nil && !st.Unlocked && st.SSHGrantCount > 0 {
 			if result, err := ac.SSHGrant(agent.SSHGrantReq{Action: "list"}); err == nil && commandHasSSHGrant(kctx.Command(), c, result.Grants) {
 				return nil
@@ -1210,6 +1238,26 @@ func maybeAutoUnlock(kctx *kong.Context, c *rootCLI) error {
 		}
 	}
 	return cli.RunUnlock(context.Background(), c.Unlock.AgentBin, "", "")
+}
+
+// commandHasValueGrant reports whether a locked read is covered by a secret
+// grant, so the interactive unlock prompt is skipped.
+func commandHasValueGrant(command string, c *rootCLI) bool {
+	switch legacySecretSpelling(command) {
+	case "get <name>":
+		g := c.Get
+		if strings.HasPrefix(command, "secret ") {
+			g = c.Secret.Get
+		}
+		return cli.HasGrantedValue("secret", g.Scope, g.Name, "")
+	case "pass field get <name> <path>":
+		v := c.Pass.Field.Get
+		return cli.HasGrantedValue("pass", v.Scope, strings.TrimPrefix(v.Name, "pass:"), v.Path)
+	case "service get <name> <field>":
+		v := c.Service.Get
+		return cli.HasGrantedValue("service", v.Scope, v.Name, v.Field)
+	}
+	return false
 }
 
 func commandNeedsUnlockedVault(command string) bool {
@@ -1276,6 +1324,7 @@ func commandNeedsUnlockedVault(command string) bool {
 		"service add <name>", "service set <name>", "service set <name> <field>", "service set <name> <field> <value>",
 		"service get <name> <field>", "service unset <name> <field>", "service env <name>", "service k8s-secret <name>",
 		"run <command>",
+		"secret grant <name>", "pass grant <name> <field>", "service grant <name> <field>", "secret revoke <id>",
 		"service deploy <name>",
 		"recipe add <name> <command>", "recipe edit <name> <command>",
 		"recipe list", "recipe ls", "recipe list <service>", "recipe ls <service>",
@@ -1429,6 +1478,19 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 		// inside it to keep in step.
 		return s.RenameItem(ctx, cli.KindSecret, c.Secret.Rename.Scope,
 			c.Secret.Rename.Name, c.Secret.Rename.New, c.Secret.Rename.Force, nil)
+	case "secret grant <name>":
+		v := c.Secret.Grant
+		return cli.RunValueGrant(ctx, "secret", v.Scope, v.Name, "", v.TTL, v.Method)
+	case "pass grant <name> <field>":
+		v := c.Pass.Grant
+		return cli.RunValueGrant(ctx, "pass", v.Scope, strings.TrimPrefix(v.Name, "pass:"), v.Field, v.TTL, v.Method)
+	case "service grant <name> <field>":
+		v := c.Service.Grant
+		return cli.RunValueGrant(ctx, "service", v.Scope, v.Name, v.Field, v.TTL, v.Method)
+	case "secret grants":
+		return cli.RunValueGrants(ctx, c.Secret.Grants.JSON)
+	case "secret revoke <id>":
+		return cli.RunValueRevoke(ctx, c.Secret.Revoke.ID)
 	case "secret move <name>":
 		s, err := cli.Open(ctx)
 		if err != nil {

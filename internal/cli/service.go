@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/valentinkolb/fd0.sh/internal/crypto"
+	"github.com/valentinkolb/fd0.sh/internal/secretgrant"
 	"github.com/valentinkolb/fd0.sh/internal/service"
 )
 
@@ -415,6 +417,15 @@ func RunServiceFieldRemove(ctx context.Context, scopeID, name, field string, yes
 // for terminals.
 func RunServiceGet(ctx context.Context, scopeID, name, field string, raw bool) error {
 	s, _, svc, err := openService(ctx, scopeID, name)
+	if errors.Is(err, ErrAgentLocked) {
+		v, gerr := grantedValue(secretgrant.KindService, scopeID, name, field)
+		if gerr != nil {
+			return gerr
+		}
+		defer crypto.Wipe(v)
+		printValue(v, raw)
+		return nil
+	}
 	if err != nil {
 		return err
 	}

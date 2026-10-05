@@ -16,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/valentinkolb/fd0.sh/internal/crypto"
 	"github.com/valentinkolb/fd0.sh/internal/passitem"
+	"github.com/valentinkolb/fd0.sh/internal/secretgrant"
 	"github.com/valentinkolb/fd0.sh/internal/tui"
 )
 
@@ -487,6 +489,15 @@ func RunPassFieldSet(ctx context.Context, o PassFieldSetOpts) error {
 
 func RunPassFieldGet(ctx context.Context, scopeID, itemName, path string, raw bool) error {
 	s, _, item, err := openPassItem(ctx, scopeID, itemName)
+	if errors.Is(err, ErrAgentLocked) {
+		v, gerr := grantedValue(secretgrant.KindPass, scopeID, strings.TrimPrefix(itemName, passNamePrefix), path)
+		if gerr != nil {
+			return gerr
+		}
+		defer crypto.Wipe(v)
+		printValue(v, raw)
+		return nil
+	}
 	if err != nil {
 		return err
 	}

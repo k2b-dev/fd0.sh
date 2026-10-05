@@ -255,6 +255,8 @@ type VaultBody struct {
 	SSHGrants        []SSHGrant                `cbor:"ssh_grants,omitempty"`
 	// RecipeApprovals let this device run exact deploy recipes; never shared.
 	RecipeApprovals []RecipeApproval `cbor:"recipe_approvals,omitempty"`
+	// SecretGrants let this device read single values while locked; never shared.
+	SecretGrants []SecretGrant `cbor:"secret_grants,omitempty"`
 	SuperPriv        []byte                    `cbor:"super_priv"`
 	AuthTip          ChainTip                  `cbor:"auth_tip"`
 	Scopes           map[string]ScopeVaultData `cbor:"scopes"`
@@ -472,6 +474,22 @@ type Argon2Params struct {
 	M uint32 `cbor:"m"` // memory in KiB
 	T uint32 `cbor:"t"` // iterations
 	P uint8  `cbor:"p"` // parallelism
+}
+
+// SecretGrant lets one device read one value while the vault is locked
+// (docs/SECRET_GRANTS_PLAN.md). It pins the record ID, so a new record with
+// the same name never inherits it. Owned by the agent, not ReSeal callers.
+type SecretGrant struct {
+	ID        string `cbor:"id" json:"id"`
+	DeviceID  string `cbor:"device_id" json:"deviceId"`
+	ScopeID   string `cbor:"scope_id" json:"scopeId"`
+	RecordID  string `cbor:"record_id" json:"recordId"`
+	Kind      string `cbor:"kind" json:"kind"`             // secret, pass or service
+	Name      string `cbor:"name" json:"name"`             // record name without kind prefix
+	Field     string `cbor:"field,omitempty" json:"field"` // pass field path or service field
+	FieldType string `cbor:"field_type" json:"fieldType"`  // text or secret
+	CreatedAt int64  `cbor:"created_at" json:"createdAt"`
+	ExpiresAt int64  `cbor:"expires_at" json:"expiresAt"`
 }
 
 // RecipeApproval lets one device run one deploy recipe while its definition

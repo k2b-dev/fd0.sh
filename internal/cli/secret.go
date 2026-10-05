@@ -14,7 +14,9 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/valentinkolb/fd0.sh/internal/chain"
+	"github.com/valentinkolb/fd0.sh/internal/crypto"
 	"github.com/valentinkolb/fd0.sh/internal/proto"
+	"github.com/valentinkolb/fd0.sh/internal/secretgrant"
 	"github.com/valentinkolb/fd0.sh/internal/tui"
 )
 
@@ -230,6 +232,15 @@ func RunSecretGet(ctx context.Context, scopeID, name string) (string, error) {
 		return "", err
 	}
 	s, err := Open(ctx)
+	if errors.Is(err, ErrAgentLocked) {
+		// A secret grant may keep exactly this value readable while locked.
+		v, gerr := grantedValue(secretgrant.KindSecret, scopeID, name, "")
+		if gerr != nil {
+			return "", gerr
+		}
+		defer crypto.Wipe(v)
+		return string(v), nil
+	}
 	if err != nil {
 		return "", err
 	}

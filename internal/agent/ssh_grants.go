@@ -60,12 +60,15 @@ func (s *Server) clearSSHGrantsHeld() {
 		g.private.Destroy()
 	}
 	s.sshGrants = nil
+	// Secret grants share every lifecycle point with SSH grants.
+	s.clearSecretGrantsHeld()
 }
 
 // Rebuild on unlock and every committed vault write: key rotation, deletion,
 // changed connection settings or lost membership disable an old approval.
 func (s *Server) refreshSSHGrantsHeld(body *proto.VaultBody) {
 	s.clearSSHGrantsHeld()
+	defer s.refreshSecretGrantsHeld(body)
 	if s.superPriv == nil || s.deviceID == "" {
 		return
 	}

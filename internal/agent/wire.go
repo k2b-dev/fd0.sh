@@ -74,6 +74,7 @@ const (
 	OpSSHGrant         uint8 = 12
 	OpLockAll          uint8 = 13
 	OpRecipeApproval   uint8 = 14
+	OpSecretGrant      uint8 = 15
 )
 
 // Request is the client→agent envelope. Exactly one of the typed fields is
@@ -81,6 +82,7 @@ const (
 type Request struct {
 	SSHGrant         *SSHGrantReq         `cbor:"ssh_grant,omitempty"`
 	RecipeApproval   *RecipeApprovalReq   `cbor:"recipe_approval,omitempty"`
+	SecretGrant      *SecretGrantReq      `cbor:"secret_grant,omitempty"`
 	Op               uint8                `cbor:"op"`
 	Unlock           *UnlockReq           `cbor:"unlock,omitempty"`
 	Sign             *SignReq             `cbor:"sign,omitempty"`
@@ -143,6 +145,7 @@ type RecoveryExportResp struct {
 type Response struct {
 	SSHGrant         *SSHGrantResp         `cbor:"ssh_grant,omitempty"`
 	RecipeApproval   *RecipeApprovalResp   `cbor:"recipe_approval,omitempty"`
+	SecretGrant      *SecretGrantResp      `cbor:"secret_grant,omitempty"`
 	Err              string                `cbor:"err,omitempty"`
 	Status           *StatusResp           `cbor:"status,omitempty"`
 	Unlock           *UnlockResp           `cbor:"unlock,omitempty"`
@@ -195,6 +198,8 @@ type StatusResp struct {
 	SSHGrantCount      int    `cbor:"ssh_grant_count,omitempty"`
 	SSHGrantsSupported bool   `cbor:"ssh_grants_supported,omitempty"`
 	RecipesSupported   bool   `cbor:"recipes_supported,omitempty"`
+	SecretGrantCount      int  `cbor:"secret_grant_count,omitempty"`
+	SecretGrantsSupported bool `cbor:"secret_grants_supported,omitempty"`
 	UnlockSession      string `cbor:"unlock_session,omitempty"` // Changes on every unlock, including within one second.
 	Unlocked           bool   `cbor:"unlocked"`
 	SinceUnix          int64  `cbor:"since,omitempty"`

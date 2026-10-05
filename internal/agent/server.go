@@ -83,6 +83,7 @@ type Server struct {
 	lifecycleWake chan struct{}
 	deviceID      string
 	sshGrants     []activeSSHGrant
+	secretGrants  []activeSecretGrant
 }
 
 // Listen creates ~/.fd0/agent.sock and accepts connections. The directory
@@ -321,7 +322,7 @@ func (s *Server) handleConn(ctx context.Context, c net.Conn) {
 	requestCtx := ctx
 	cancel := func() {}
 	responseTimeout := agentRPCTimeout
-	if req.Op == OpUnlock || req.Op == OpSSHGrant || req.Op == OpRecipeApproval {
+	if req.Op == OpUnlock || req.Op == OpSSHGrant || req.Op == OpRecipeApproval || req.Op == OpSecretGrant {
 		requestCtx, cancel = context.WithTimeout(ctx, agentUnlockTimeout)
 		responseTimeout = agentUnlockTimeout + agentUnlockServerGrace
 	}
@@ -346,6 +347,8 @@ func (s *Server) dispatch(ctx context.Context, req *Request) (resp *Response) {
 		return s.handleSSHGrant(ctx, req.SSHGrant)
 	case OpRecipeApproval:
 		return s.handleRecipeApproval(ctx, req.RecipeApproval)
+	case OpSecretGrant:
+		return s.handleSecretGrant(ctx, req.SecretGrant)
 	case OpLockAll:
 		s.mu.Lock()
 		s.lockHeld()
@@ -423,6 +426,8 @@ func (s *Server) handleStatus() *Response {
 		SSHGrantCount:      len(s.sshGrants),
 		SSHGrantsSupported: true,
 		RecipesSupported:   true,
+		SecretGrantCount:      s.activeSecretGrantCountHeld(),
+		SecretGrantsSupported: true,
 		Protocol:           ProtocolVersion,
 		StartedBy:          s.cfg.StartedBy,
 		Version:            s.cfg.Version,
@@ -721,6 +726,7 @@ func (s *Server) handleReSeal(r *ReSealReq) *Response {
 	}
 	body.SSHGrants = current.SSHGrants
 	body.RecipeApprovals = current.RecipeApprovals
+	body.SecretGrants = current.SecretGrants
 	redacted := *body
 	redacted.SuperPriv = make([]byte, ed25519.PrivateKeySize)
 	rb, err := proto.Marshal(redacted)
