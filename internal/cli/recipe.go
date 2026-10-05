@@ -251,6 +251,42 @@ func viewOf(s *Session, e recipeEntry, approved map[string]proto.RecipeApproval,
 		Approval: approvalState(e, approved), Results: results}
 }
 
+// RecipeView is a recipe as Desktop and --json show it: definition,
+// approval state on this device and the latest results. It holds no values.
+type RecipeView = recipeView
+
+// ServiceRecipes returns the recipes of one service with their results.
+func ServiceRecipes(ctx context.Context, scopeID, serviceName string) ([]RecipeView, error) {
+	s, err := Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.Close()
+	entries, err := loadRecipes(s, scopeID, serviceName)
+	if err != nil {
+		return nil, err
+	}
+	approved, err := approvals(s)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]RecipeView, 0, len(entries))
+	for _, e := range entries {
+		results, err := loadResults(s, e.ScopeID, e.Name)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, viewOf(s, e, approved, results))
+	}
+	return views, nil
+}
+
+// ApproveRecipe approves a reviewed recipe with fresh authentication; the
+// recipe must still match the reviewed digest.
+func ApproveRecipe(ctx context.Context, scopeID, name, reviewedDigest string, auth *agent.UnlockReq) error {
+	return approveRecipe(ctx, scopeID, name, reviewedDigest, auth)
+}
+
 // RunRecipeList lists recipes, optionally for one service.
 func RunRecipeList(ctx context.Context, scopeID, serviceName string, jsonOut bool) error {
 	s, err := Open(ctx)
@@ -355,7 +391,7 @@ func printRecipeDefinition(r *recipe.Recipe) {
 	for _, a := range r.Command {
 		quoted = append(quoted, shellQuote(a))
 	}
-	fmt.Printf("  service: %s\n  input:   %s\n  fields:  ", terminalSafe(r.Service), r.Input)
+	fmt.Printf("  service: %s\n  input:   %s\n  fields:  ", terminalSafe(r.Service), terminalSafe(r.Input))
 	parts := make([]string, 0, len(r.Fields))
 	for _, m := range r.Fields {
 		if m.As != "" {
@@ -582,6 +618,11 @@ type DeployOpts struct {
 	Target  string // one target of the selected recipe
 	Verbose bool
 	DryRun  bool // show what would run; run nothing, record nothing
+	// Env is merged into every command's environment before the values,
+	// for callers whose own environment is not the user's (Desktop).
+	Env []string
+	// OnResult, when set, receives each target's result as it is known.
+	OnResult func(recipe.Result)
 }
 
 // deploySync is replaced in tests that run without a server.
@@ -648,7 +689,7 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 				failure = fmt.Errorf("deploy stopped before %s: %w", label, err)
 				break
 			}
-			code, err := runRecipeCommand(ctx, run, target, home, o.Verbose)
+			code, err := runRecipeCommand(ctx, run, target, home, o.Verbose, o.Env)
 			res := recipe.Result{Recipe: run.entry.Name, Target: target, Digest: run.entry.Digest, Source: run.source,
 				Status: "ok", ExitCode: code, At: recipe.Now().Format("2006-01-02T15:04:05Z")}
 			if err != nil {
@@ -659,6 +700,9 @@ func RunServiceDeploy(ctx context.Context, o DeployOpts) error {
 				stderrln("▶ %-36s ✓ command succeeded", terminalSafe(label))
 			}
 			recorder.record(res)
+			if o.OnResult != nil {
+				o.OnResult(res)
+			}
 			if failure != nil {
 				break
 			}
@@ -823,7 +867,7 @@ func prepareDeploy(ctx context.Context, o DeployOpts, serviceName, recipeName st
 
 // runRecipeCommand runs one target without a terminal. Output is discarded
 // unless verbose, because commands can echo the values they receive.
-func runRecipeCommand(ctx context.Context, run deployRun, target, home string, verbose bool) (int, error) {
+func runRecipeCommand(ctx context.Context, run deployRun, target, home string, verbose bool, extraEnv []string) (int, error) {
 	r := run.entry.Recipe
 	argv := append([]string(nil), r.Command...)
 	argv[0] = recipe.ExpandHome(argv[0], home)
@@ -848,7 +892,7 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 	if run.prepared.Channel == recipe.ChannelFD3 {
 		meta = append(meta, "FD0_INPUT=/dev/fd/3")
 	}
-	cmd.Env = mergeEnv(mergeEnv(base, run.prepared.Env), meta)
+	cmd.Env = mergeEnv(mergeEnv(mergeEnv(base, extraEnv), run.prepared.Env), meta)
 	var inputPipe *os.File
 	switch run.prepared.Channel {
 	case recipe.ChannelStdin:
@@ -862,9 +906,18 @@ func runRecipeCommand(ctx context.Context, run deployRun, target, home string, v
 		}
 		cmd.ExtraFiles = []*os.File{rd}
 		data := run.prepared.Data
+		written := make(chan struct{})
 		go func() {
+			defer close(written)
 			_, _ = wr.Write(data)
+			wr.Close() // EOF for a reader that reads to the end
+		}()
+		// A descendant may keep fd 3 open without reading it: closing the
+		// write end when the command is done unblocks the writer, so neither
+		// the goroutine nor the buffered value outlives the command.
+		defer func() {
 			wr.Close()
+			<-written
 		}()
 		defer rd.Close()
 		inputPipe = rd

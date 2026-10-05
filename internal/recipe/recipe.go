@@ -209,6 +209,9 @@ func (r *Recipe) Validate() error {
 
 func (r *Recipe) validateInput() error {
 	channel, format := r.channelFormat()
+	if channel == ChannelEnv && r.Input != InputEnv {
+		return fmt.Errorf("recipe: unknown input %q (env takes no format)", r.Input)
+	}
 	if channel != ChannelEnv && channel != ChannelStdin && channel != ChannelFD3 {
 		return fmt.Errorf("recipe: unknown input %q (env, stdin:FORMAT or fd3:FORMAT)", r.Input)
 	}

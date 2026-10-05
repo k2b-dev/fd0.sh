@@ -211,7 +211,7 @@ func TestFD3InputUsesSameFormats(t *testing.T) {
 	if err != nil || p.Channel != ChannelFD3 || string(p.Data) != "DB_PASSWORD=\"s3cret pw\"\n" {
 		t.Fatalf("fd3: %+v %v", p, err)
 	}
-	for _, bad := range []string{"fd3:", "fd3:env", "stdin:env", "fd4:sh", "pipe:file"} {
+	for _, bad := range []string{"fd3:", "fd3:env", "stdin:env", "fd4:sh", "pipe:file", "env:garbage", "env:\x1b]52;c;x\x07"} {
 		r.Input = bad
 		if err := r.Validate(); err == nil {
 			t.Fatalf("accepted %q", bad)

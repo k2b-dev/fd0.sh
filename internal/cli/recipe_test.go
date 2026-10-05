@@ -337,9 +337,10 @@ func TestRecipeFD3InputSurvivesStdinConsumers(t *testing.T) {
 	if got, _ := os.ReadFile(out); string(got) != "fd3-value" {
 		t.Fatalf("fd3 input: %q", got)
 	}
-	// A command that never reads fd 3 still finishes.
+	// A command that never reads fd 3, even with a background child holding
+	// it open, still finishes.
 	ignore := RecipeOpts{Name: "app/ignore", Scope: scope, Fields: []string{"token"}, Input: "fd3:file",
-		Command: []string{"/bin/sh", "-c", "exit 0"}}
+		Command: []string{"/bin/sh", "-c", "sleep 2 & exit 0"}}
 	if err := RunRecipeAdd(ctx, ignore, false); err != nil {
 		t.Fatal(err)
 	}
