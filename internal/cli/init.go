@@ -174,8 +174,9 @@ func InitWithPassphrase(ctx context.Context, pass []byte) (*InitResult, error) {
 //
 // Method selection (in order):
 //  1. Explicit --method flag, if non-empty.
-//  2. Multiple methods on a TTY: ask, preselecting the device-local default.
-//  3. Otherwise use the configured default or first method by method_id.
+//  2. A valid device-local default is used without asking.
+//  3. Multiple methods on a TTY without a usable default: ask.
+//  4. Otherwise use the first method by method_id.
 //
 // For passphrase methods we prompt "Passphrase: ". For YubiKey methods
 // we inspect public_params.pin_policy: touch-only methods skip the PIN

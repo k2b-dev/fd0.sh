@@ -205,7 +205,7 @@ fd0 auth default              # show the current device default
 fd0 auth default --clear      # return to fd0's built-in selection
 ```
 
-The setting is local to the current device in `~/.fd0/config.toml` under `[auth].default_method`. It is not synced, does not add or remove auth methods, and does not change vault wraps. `fd0 unlock --method=...` still overrides the local default for that invocation. Interactive unlock and SSH grant authorization always show the same chooser when multiple methods are enrolled; the local default is only preselected. An explicit `--method` skips the chooser. Non-interactive unlock keeps a deterministic fallback.
+The setting is local to the current device in `~/.fd0/config.toml` under `[auth].default_method`. It is not synced, does not add or remove auth methods, and does not change vault wraps. `fd0 unlock --method=...` still overrides the local default for that invocation. When a valid local default is set, unlock and fresh authorization (SSH grants, secret grants, recipe approvals) use it without asking; `--method` picks another method for one invocation. Without a default, interactive calls show a chooser when several methods are enrolled. Non-interactive unlock keeps a deterministic fallback.
 
 ## Storing and fetching
 

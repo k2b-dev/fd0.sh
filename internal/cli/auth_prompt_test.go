@@ -15,8 +15,7 @@ func TestAuthenticationMethodChoice(t *testing.T) {
 		interactive, prompt, warning            bool
 	}{
 		{"choose key", "", "", "2\n", "am_z", true, true, false},
-		{"default is only preselected", "", "yubikey", "1\n", "am_a", true, true, false},
-		{"enter accepts preference", "", "yubikey", "\n", "am_z", true, true, false},
+		{"default skips the chooser", "", "yubikey", "", "am_z", true, false, false},
 		{"stale preference", "", "am_removed", "2\n", "am_z", true, true, true},
 		{"explicit selector bypasses", "yubikey", "passphrase", "", "am_z", true, false, false},
 		{"noninteractive preference", "", "yubikey", "", "am_z", false, false, false},

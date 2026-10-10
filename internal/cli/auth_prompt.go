@@ -11,14 +11,16 @@ import (
 	"github.com/valentinkolb/fd0.sh/internal/proto"
 )
 
-// Used by both unlock and fresh operation authorization. A saved preference
-// preselects the interactive choice; only an explicit selector bypasses it.
+// Used by both unlock and fresh operation authorization. An explicit selector
+// or a valid device default is used directly; the chooser only appears when
+// neither picks a method.
 func selectAuthenticationMethod(active []proto.AuthMethod, requested, preferred string, interactive bool, in io.Reader, out io.Writer) (proto.AuthMethod, error) {
 	if requested != "" {
 		return pickUnlockMethod(active, requested)
 	}
 	preferred = strings.TrimSpace(preferred)
 	chosen, err := pickUnlockMethod(active, preferred)
+	usable := err == nil && preferred != ""
 	if err != nil && preferred != "" {
 		fmt.Fprintln(out, "warn: auth default no longer matches an enrolled method; choose a new default with fd0 auth default")
 		chosen, err = pickUnlockMethod(active, "")
@@ -26,7 +28,7 @@ func selectAuthenticationMethod(active []proto.AuthMethod, requested, preferred 
 	if err != nil {
 		return chosen, err
 	}
-	if interactive && len(active) > 1 {
+	if interactive && len(active) > 1 && !usable {
 		return promptUnlockMethod(active, in, out, chosen.MethodID)
 	}
 	if len(active) > 1 {

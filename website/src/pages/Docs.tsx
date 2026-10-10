@@ -958,9 +958,9 @@ $ fd0 secret get cld-client-secret --raw --scope private-pass`}</Box>
     <P>
       Auth methods are stored in the vault. The default unlock method is a
       local device preference in <Code>~/.fd0/config.toml</Code>; it is not
-      synced to other machines. When several methods are available, interactive
-      unlock and SSH grant authorization show the same method chooser, with
-      the default preselected. Only an explicit <Code>--method</Code> skips it.
+      synced to other machines. With a default set, unlock and fresh
+      authorization use it without asking; <Code>--method</Code> picks another
+      method once. Without a default, fd0 asks which method to use.
     </P>
     <Cmd signature="fd0 auth ls" body="List enrolled unlock methods. The current session is marked with *, and the local default is marked with default." />
     <Cmd signature="fd0 auth default" body="Show the default unlock method for this device." />
@@ -1458,7 +1458,7 @@ $ fd0 unlock --method=yubikey`}</Box>
     <P>
       <Code>fd0 auth default yubikey</Code> stores a device-local preference
       in <Code>~/.fd0/config.toml</Code>, so plain <Code>fd0 unlock</Code>{" "}
-      preselects the YubiKey in the method chooser. <Code>fd0 doctor</Code> reports
+      uses the YubiKey without asking. <Code>fd0 doctor</Code> reports
       whether the CLI and running agent are both the YubiKey flavor. After an
       update, run{" "}
       <Code>fd0 agent restart</Code> before testing unlock.
