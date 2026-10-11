@@ -71,8 +71,9 @@ func ManageSecretGrant(ctx context.Context, r agent.SecretGrantReq) (*agent.Secr
 }
 
 // RunValueGrant reviews and saves a grant for one value after fresh
-// authentication in a terminal.
-func RunValueGrant(ctx context.Context, kind, scope, name, field, ttl, method string) error {
+// authentication in a terminal. On a locked vault one authentication both
+// unlocks and authorizes, after the request is shown.
+func RunValueGrant(ctx context.Context, agentBin, kind, scope, name, field, ttl, method string) error {
 	if !IsTTY(os.Stdin) || !IsTTY(os.Stderr) {
 		return errors.New("create secret grants yourself in an interactive terminal; fresh authentication is required")
 	}
@@ -83,7 +84,21 @@ func RunValueGrant(ctx context.Context, kind, scope, name, field, ttl, method st
 	if scope == "" {
 		return errors.New("--scope is required, so the grant names exactly one value")
 	}
-	r := agent.SecretGrantReq{Action: "prepare", ScopeID: scope, Kind: kind, Name: name, Field: field, ExpiresAt: time.Now().Add(d).Unix()}
+	expires := time.Now().Add(d)
+	locked, err := authenticateLockedGrant(ctx, agentBin, method, func() {
+		target := name
+		if field != "" {
+			target += " → " + field
+		}
+		fmt.Fprintf(os.Stderr, "Keep this value readable on this device while fd0 is locked:\n  %s %s in %s\n  Expires: %s\n",
+			kind, terminalSafe(target), terminalSafe(scope), expires.Format("2006-01-02 15:04"))
+		fmt.Fprintln(os.Stderr, valueGrantWarning)
+	})
+	defer locked.wipe()
+	if err != nil {
+		return err
+	}
+	r := agent.SecretGrantReq{Action: "prepare", ScopeID: scope, Kind: kind, Name: name, Field: field, ExpiresAt: expires.Unix()}
 	preview, err := ManageSecretGrant(ctx, r)
 	if err != nil {
 		return err
@@ -93,29 +108,34 @@ func RunValueGrant(ctx context.Context, kind, scope, name, field, ttl, method st
 	}
 	g := preview.Grants[0]
 	r.ScopeID = g.ScopeID
-	target := g.Name
-	if g.Field != "" {
-		target += " → " + g.Field
+	auth := (*agent.UnlockReq)(nil)
+	if locked != nil {
+		auth = locked.request()
+	} else {
+		target := g.Name
+		if g.Field != "" {
+			target += " → " + g.Field
+		}
+		fmt.Fprintf(os.Stderr, "Keep this value readable on this device while fd0 is locked:\n  %s %s (%s field) in %s\n  Expires: %s\n",
+			g.Kind, terminalSafe(target), g.FieldType, terminalSafe(g.ScopeLabel), time.Unix(g.ExpiresAt, 0).Format("2006-01-02 15:04"))
+		fmt.Fprintln(os.Stderr, valueGrantWarning+" Authenticate again to authorize exactly this grant. Ctrl+C cancels.")
+		paths, err := fdhome.Resolve()
+		if err != nil {
+			return err
+		}
+		methods, err := LoadGrantAuthMethods(paths)
+		if err != nil {
+			return err
+		}
+		chosen, credential, err := promptAuthentication(paths, methods, method)
+		defer crypto.Wipe(credential.Passphrase)
+		defer crypto.Wipe(credential.YubikeyPIN)
+		if err != nil {
+			return err
+		}
+		auth = &agent.UnlockReq{MethodType: chosen.MethodType, Passphrase: credential.Passphrase, YubikeyPIN: credential.YubikeyPIN}
 	}
-	fmt.Fprintf(os.Stderr, "Keep this value readable on this device while fd0 is locked:\n  %s %s (%s field) in %s\n  Expires: %s\n",
-		g.Kind, terminalSafe(target), g.FieldType, terminalSafe(g.ScopeLabel), time.Unix(g.ExpiresAt, 0).Format("2006-01-02 15:04"))
-	fmt.Fprintln(os.Stderr, "While the grant is active, every process of your OS user can read this value; locking does not stop that.\nfd0 lock --all stops all grants until the next unlock. Authenticate again to authorize exactly this grant. Ctrl+C cancels.")
-	paths, err := fdhome.Resolve()
-	if err != nil {
-		return err
-	}
-	methods, err := LoadGrantAuthMethods(paths)
-	if err != nil {
-		return err
-	}
-	chosen, credential, err := promptAuthentication(paths, methods, method)
-	defer crypto.Wipe(credential.Passphrase)
-	defer crypto.Wipe(credential.YubikeyPIN)
-	if err != nil {
-		return err
-	}
-	r.Action, r.Digest = "create", preview.Digest
-	r.Authentication = &agent.UnlockReq{MethodType: chosen.MethodType, Passphrase: credential.Passphrase, YubikeyPIN: credential.YubikeyPIN}
+	r.Action, r.Digest, r.Authentication = "create", preview.Digest, auth
 	result, err := ManageSecretGrant(ctx, r)
 	if err != nil {
 		return err
@@ -123,6 +143,8 @@ func RunValueGrant(ctx context.Context, kind, scope, name, field, ttl, method st
 	fmt.Fprintf(os.Stderr, "✓ secret grant saved: %s (active after the next lock; use exact names and --scope while locked)\n", result.Grants[0].ID)
 	return nil
 }
+
+const valueGrantWarning = "While the grant is active, every process of your OS user can read this value; locking does not stop that.\nfd0 lock --all stops all grants until the next unlock."
 
 // RunValueGrants lists this device's secret grants without values.
 func RunValueGrants(ctx context.Context, asJSON bool) error {

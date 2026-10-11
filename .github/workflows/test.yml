@@ -57,6 +57,9 @@ jobs:
       - name: test isolated machine identity
         run: bash tests/run_isolated_integration.sh tests/integration_machine_identity.sh
 
+      - name: test isolated secret grant on a locked vault
+        run: bash tests/run_isolated_integration.sh tests/integration_grant_unlock.sh
+
       - name: coverage summary
         if: matrix.os == 'ubuntu-latest'
         run: go tool cover -func=coverage.out | tail -5

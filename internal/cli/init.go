@@ -188,6 +188,17 @@ func InitWithPassphrase(ctx context.Context, pass []byte) (*InitResult, error) {
 // prompts: the key file is the passphrase of an unattended identity, and an
 // already unlocked agent is left as it is so jobs can call it every run.
 func RunUnlock(ctx context.Context, agentBin, method, keyFile string) error {
+	return runUnlock(ctx, agentBin, method, keyFile, nil)
+}
+
+// presetCredential is an authentication the caller already collected. The
+// caller owns it and wipes it after its own use.
+type presetCredential struct {
+	method     proto.AuthMethod
+	credential agent.UnlockCredential
+}
+
+func runUnlock(ctx context.Context, agentBin, method, keyFile string, preset *presetCredential) error {
 	if keyFile != "" && method != "" && method != proto.AuthPassphrase && !strings.HasPrefix(method, "am_") {
 		return errors.New("--key-file unlocks a passphrase method; do not combine it with --method " + method)
 	}
@@ -259,16 +270,21 @@ func RunUnlock(ctx context.Context, agentBin, method, keyFile string) error {
 	}
 	var chosen proto.AuthMethod
 	var cred agent.UnlockCredential
-	if keyFile != "" {
+	switch {
+	case preset != nil:
+		chosen, cred = preset.method, preset.credential
+	case keyFile != "":
 		// Read only when an unlock is actually needed: an unlocked agent is
 		// left as it is, without checking the key.
 		chosen = keyMethod
 		cred.Passphrase, err = ReadKeyFile(keyFile)
-	} else {
+	default:
 		chosen, cred, err = promptAuthentication(paths, activeMethods, method)
 	}
-	defer crypto.Wipe(cred.Passphrase)
-	defer crypto.Wipe(cred.YubikeyPIN)
+	if preset == nil {
+		defer crypto.Wipe(cred.Passphrase)
+		defer crypto.Wipe(cred.YubikeyPIN)
+	}
 	if err != nil {
 		return err
 	}

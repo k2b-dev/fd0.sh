@@ -342,7 +342,7 @@ fd0 secret grants              # list (never values); fd0 secret revoke ID
 fd0 secret get cld-client-secret --raw --scope private-pass   # works while locked
 ```
 
-Locked reads need the exact name and `--scope`. Every process of the OS user can read a granted value while the grant is active; prefer a narrow value and a short TTL. Renaming or deleting the value removes the grant. `fd0 lock --all` stops all grants until the next unlock.
+On a locked vault the grant command shows the request first and asks for one authentication that unlocks and authorizes it. Locked reads need the exact name and `--scope`. Every process of the OS user can read a granted value while the grant is active; prefer a narrow value and a short TTL. Renaming or deleting the value removes the grant. `fd0 lock --all` stops all grants until the next unlock.
 
 ## Services
 

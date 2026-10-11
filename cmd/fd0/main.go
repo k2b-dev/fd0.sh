@@ -1212,6 +1212,12 @@ func maybeAutoUnlock(kctx *kong.Context, c *rootCLI) error {
 	if !commandNeedsUnlockedVault(kctx.Command()) {
 		return nil
 	}
+	// Grants unlock themselves, so one authentication both unlocks and
+	// authorizes the grant.
+	switch kctx.Command() {
+	case "secret grant <name>", "pass grant <name> <field>", "service grant <name> <field>", "ssh grant <alias>":
+		return nil
+	}
 	if !cli.IsTTY(os.Stdin) || !cli.IsTTY(os.Stderr) {
 		return nil
 	}
@@ -1480,13 +1486,13 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 			c.Secret.Rename.Name, c.Secret.Rename.New, c.Secret.Rename.Force, nil)
 	case "secret grant <name>":
 		v := c.Secret.Grant
-		return cli.RunValueGrant(ctx, "secret", v.Scope, v.Name, "", v.TTL, v.Method)
+		return cli.RunValueGrant(ctx, c.Unlock.AgentBin, "secret", v.Scope, v.Name, "", v.TTL, v.Method)
 	case "pass grant <name> <field>":
 		v := c.Pass.Grant
-		return cli.RunValueGrant(ctx, "pass", v.Scope, strings.TrimPrefix(v.Name, "pass:"), v.Field, v.TTL, v.Method)
+		return cli.RunValueGrant(ctx, c.Unlock.AgentBin, "pass", v.Scope, strings.TrimPrefix(v.Name, "pass:"), v.Field, v.TTL, v.Method)
 	case "service grant <name> <field>":
 		v := c.Service.Grant
-		return cli.RunValueGrant(ctx, "service", v.Scope, v.Name, v.Field, v.TTL, v.Method)
+		return cli.RunValueGrant(ctx, c.Unlock.AgentBin, "service", v.Scope, v.Name, v.Field, v.TTL, v.Method)
 	case "secret grants":
 		return cli.RunValueGrants(ctx, c.Secret.Grants.JSON)
 	case "secret revoke <id>":
@@ -1606,7 +1612,7 @@ func dispatch(kctx *kong.Context, c *rootCLI) error {
 
 	// ─── ssh ──────────────────────────────────────────────────────────
 	case "ssh grant <alias>":
-		return cli.RunSSHGrant(ctx, c.Ssh.Grant.Scope, c.Ssh.Grant.Alias, c.Ssh.Grant.Method, c.Ssh.Grant.KnownHosts)
+		return cli.RunSSHGrant(ctx, c.Unlock.AgentBin, c.Ssh.Grant.Scope, c.Ssh.Grant.Alias, c.Ssh.Grant.Method, c.Ssh.Grant.KnownHosts)
 	case "ssh grants":
 		return cli.RunSSHGrants(ctx, c.Ssh.Grants.JSON)
 	case "ssh revoke <id>":

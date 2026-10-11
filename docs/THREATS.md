@@ -808,7 +808,10 @@ lifecycle. `fd0 lock --all` clears active SSH keys too. Existing SSH sessions an
 multiplexed connections are outside the agent's authentication boundary.
 
 The supported grant operation always validates freshly supplied credentials
-against the canonical vault and active authentication methods. It binds the
+against the canonical vault and active authentication methods. When the vault
+is locked, the CLI shows the requested alias first and uses the one credential
+the person then enters both to unlock and to authorize; the resolved user,
+server and key are printed with the result, and a wrong grant is revoked. It binds the
 approval to a digest of the device, record identities, connection settings,
 client public key and already-trusted server host keys. Generic vault re-sealing
 cannot modify approvals. This is a workflow boundary, not a defense against
@@ -894,7 +897,8 @@ device while the vault is locked, for unattended consumers that run as the
 same OS user. While a grant is active, every process of that user can read
 the value through the agent socket; that is the documented trade against
 keeping the whole vault unlocked or copying the value into a file. Grants
-are created only with fresh authentication in a terminal, bound to the
+are created only with fresh authentication in a terminal (on a locked
+vault, the one unlock credential entered after the request is shown), bound to the
 device and pinned to the record ID, field and field type; a deleted,
 renamed or retyped value removes the grant, and a recreated one needs a new
 grant. A scope writer can always rotate a granted value; a field removed and

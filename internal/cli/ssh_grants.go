@@ -52,11 +52,24 @@ func ManageSSHGrant(ctx context.Context, r agent.SSHGrantReq) (*agent.SSHGrantRe
 	return s.Agent.SSHGrant(r)
 }
 
-func RunSSHGrant(ctx context.Context, scope, name, method, knownHosts string) error {
+func RunSSHGrant(ctx context.Context, agentBin, scope, name, method, knownHosts string) error {
 	// A terminal is a UX boundary, not proof of human presence. Credentials are
 	// never accepted through command-line flags, environment variables or MCP.
 	if !IsTTY(os.Stdin) || !IsTTY(os.Stderr) {
 		return errors.New("run fd0 ssh grant yourself in an interactive terminal; fresh authentication is required")
+	}
+	// On a locked vault the host details are encrypted: show the request as
+	// typed, authenticate once, and print the details with the result.
+	locked, err := authenticateLockedGrant(ctx, agentBin, method, func() {
+		target := terminalSafe(name)
+		if scope != "" {
+			target += " in " + terminalSafe(scope)
+		}
+		fmt.Fprintf(os.Stderr, "Allow SSH while fd0 is locked on this device:\n  host %s\n%s\n", target, sshGrantNote)
+	})
+	defer locked.wipe()
+	if err != nil {
+		return err
 	}
 	r := agent.SSHGrantReq{Action: "prepare", ScopeID: scope, Name: name, KnownHosts: knownHosts}
 	preview, err := ManageSSHGrant(ctx, r)
@@ -68,29 +81,38 @@ func RunSSHGrant(ctx context.Context, scope, name, method, knownHosts string) er
 	}
 	g := preview.Grants[0]
 	r.ScopeID = g.ScopeID
-	fmt.Fprintf(os.Stderr, "Allow SSH while fd0 is locked on this device:\n  %s: %s@%s:%d\n  Key: %s\n", terminalSafe(g.Name), terminalSafe(g.User), terminalSafe(g.Hostname), effectiveSSHPort(g.Port), g.Fingerprint)
-	for _, fp := range g.HostFingerprints {
-		fmt.Fprintf(os.Stderr, "  Server key: %s\n", fp)
+	details := func() {
+		fmt.Fprintf(os.Stderr, "  %s: %s@%s:%d\n  Key: %s\n", terminalSafe(g.Name), terminalSafe(g.User), terminalSafe(g.Hostname), effectiveSSHPort(g.Port), g.Fingerprint)
+		for _, fp := range g.HostFingerprints {
+			fmt.Fprintf(os.Stderr, "  Server key: %s\n", fp)
+		}
+		if g.Jump != "" {
+			fmt.Fprintf(os.Stderr, "  Jump host(s): %s — each required jump host needs its own grant.\n", terminalSafe(g.Jump))
+		}
 	}
-	if g.Jump != "" {
-		fmt.Fprintf(os.Stderr, "  Jump host(s): %s — each required jump host needs its own grant.\n", terminalSafe(g.Jump))
+	var auth *agent.UnlockReq
+	if locked != nil {
+		auth = locked.request()
+	} else {
+		fmt.Fprintln(os.Stderr, "Allow SSH while fd0 is locked on this device:")
+		details()
+		fmt.Fprintln(os.Stderr, sshGrantNote+"\nAuthenticate again to authorize exactly this grant. Ctrl+C cancels.")
+		paths, err := fdhome.Resolve()
+		if err != nil {
+			return err
+		}
+		methods, err := LoadGrantAuthMethods(paths)
+		if err != nil {
+			return err
+		}
+		chosen, credential, err := promptAuthentication(paths, methods, method)
+		defer crypto.Wipe(credential.Passphrase)
+		defer crypto.Wipe(credential.YubikeyPIN)
+		if err != nil {
+			return err
+		}
+		auth = &agent.UnlockReq{MethodType: chosen.MethodType, Passphrase: credential.Passphrase, YubikeyPIN: credential.YubikeyPIN}
 	}
-	fmt.Fprintln(os.Stderr, "Requires host-bound OpenSSH authentication; agent forwarding stays unavailable while locked.\nAuthenticate again to authorize exactly this grant. Ctrl+C cancels.")
-	paths, err := fdhome.Resolve()
-	if err != nil {
-		return err
-	}
-	methods, err := LoadGrantAuthMethods(paths)
-	if err != nil {
-		return err
-	}
-	chosen, credential, err := promptAuthentication(paths, methods, method)
-	defer crypto.Wipe(credential.Passphrase)
-	defer crypto.Wipe(credential.YubikeyPIN)
-	if err != nil {
-		return err
-	}
-	auth := &agent.UnlockReq{MethodType: chosen.MethodType, Passphrase: credential.Passphrase, YubikeyPIN: credential.YubikeyPIN}
 	r.Action = "create"
 	r.Digest = preview.Digest
 	r.Authentication = auth
@@ -99,8 +121,14 @@ func RunSSHGrant(ctx context.Context, scope, name, method, knownHosts string) er
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "✓ SSH grant saved: %s\n", result.Grants[0].ID)
+	if locked != nil {
+		details()
+		fmt.Fprintf(os.Stderr, "  Remove it with fd0 ssh revoke %s if these details are not what you expected.\n", result.Grants[0].ID)
+	}
 	return nil
 }
+
+const sshGrantNote = "Requires host-bound OpenSSH authentication; agent forwarding stays unavailable while locked."
 
 func RunSSHGrants(ctx context.Context, asJSON bool) error {
 	result, err := ManageSSHGrant(ctx, agent.SSHGrantReq{Action: "list"})

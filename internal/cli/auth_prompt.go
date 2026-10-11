@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/valentinkolb/fd0.sh/internal/agent"
+	"github.com/valentinkolb/fd0.sh/internal/crypto"
 	"github.com/valentinkolb/fd0.sh/internal/fdhome"
 	"github.com/valentinkolb/fd0.sh/internal/proto"
 )
@@ -65,4 +68,51 @@ func promptAuthentication(paths fdhome.Paths, active []proto.AuthMethod, request
 		err = fmt.Errorf("unknown method type %q on user chain", method.MethodType)
 	}
 	return method, credential, err
+}
+
+// authenticateLockedGrant covers a grant command on a locked vault with one
+// authentication: it shows the request as typed, asks once and unlocks with
+// that credential, which then also authorizes the grant. It returns nil when
+// the vault is already unlocked; the caller then asks after its own review.
+// The caller wipes the returned credential.
+func authenticateLockedGrant(ctx context.Context, agentBin, method string, describe func()) (*presetCredential, error) {
+	paths, err := fdhome.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	if c := agent.NewClient(paths.AgentSock); c.IsRunning() {
+		if st, err := c.Status(); err == nil && st.Unlocked {
+			return nil, nil
+		}
+	}
+	if !VaultExists(paths) {
+		return nil, errors.New("no vault found — run `fd0 init` first")
+	}
+	methods, err := LoadGrantAuthMethods(paths)
+	if err != nil {
+		return nil, err
+	}
+	describe()
+	fmt.Fprintln(os.Stderr, "fd0 is locked. Authenticate once to unlock and authorize exactly this grant. Ctrl+C cancels.")
+	chosen, credential, err := promptAuthentication(paths, methods, method)
+	preset := &presetCredential{method: chosen, credential: credential}
+	if err == nil {
+		err = runUnlock(ctx, agentBin, method, "", preset)
+	}
+	if err != nil {
+		preset.wipe()
+		return nil, err
+	}
+	return preset, nil
+}
+
+func (p *presetCredential) wipe() {
+	if p != nil {
+		crypto.Wipe(p.credential.Passphrase)
+		crypto.Wipe(p.credential.YubikeyPIN)
+	}
+}
+
+func (p *presetCredential) request() *agent.UnlockReq {
+	return &agent.UnlockReq{MethodType: p.method.MethodType, Passphrase: p.credential.Passphrase, YubikeyPIN: p.credential.YubikeyPIN}
 }

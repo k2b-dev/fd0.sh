@@ -17,8 +17,10 @@ restart before the keys become available again.
    ```
 
 3. The user reviews the SSH user, server, and key fingerprints, then authenticates
-   again using the same method chooser as unlock (passphrase or YubiKey). An already unlocked vault is
-   insufficient. Never ask them to send credentials in chat, capture their input,
+   again (passphrase or YubiKey). An already unlocked vault is insufficient. On a
+   locked vault the command shows the requested host first and asks once: that
+   authentication unlocks and authorizes the grant, and the host details follow
+   with the result. Never ask them to send credentials in chat, capture their input,
    or run this authorization command on their behalf. There is no `--yes`,
    password flag or organization-MCP tool for creating grants.
 4. Use `fd0 ssh grants --json` to check the saved selection and active state.
