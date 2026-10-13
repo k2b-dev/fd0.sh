@@ -139,6 +139,12 @@ access; standard vault access does not.
 
 Push `desktop-vX.Y.Z`. `.github/workflows/release-desktop.yml` verifies the repository, builds YubiKey-enabled macOS and Linux artifacts, signs and notarizes macOS bundles, publishes an SPDX SBOM and GitHub provenance, signs the checksum manifest with Sigstore, verifies it with fd0's embedded verifier, and publishes one GitHub release from draft state only after every artifact is present.
 
+The build pins `@electron/notarize` to `3.1.2` for its corrected stapling
+retries. The separate ticket validation retries CloudKit connection loss or
+timeout up to four attempts, waiting 10, 20, then 40 seconds. A rejected
+notarization, invalid ticket, or exhausted retry still fails the release;
+signature and Gatekeeper checks remain required.
+
 Required GitHub secrets:
 
 - `MACOS_CERTIFICATE`: base64 PKCS#12 Developer ID Application certificate
